@@ -26,7 +26,12 @@ def fetch(slug, refresh=False, max_age=3600):
     m = re.search(r"var\s+ecrData\s*=\s*", html)
     if not m:
         raise RuntimeError(f"no ecrData on {slug}.php")
-    data, _ = json.JSONDecoder().raw_decode(html[html.index("{", m.end() - 1):])
+    # Decode the value that follows `=` itself. Searching for the next "{" is
+    # wrong when the page ships `ecrData = [];` -- it lands on the next variable
+    # (sosData) and returns strength-of-schedule data as if it were rankings.
+    data, _ = json.JSONDecoder().raw_decode(html, m.end())
+    if not isinstance(data, dict):
+        data = {"players": []}              # page exists but carries no rankings
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
     time.sleep(1.0)

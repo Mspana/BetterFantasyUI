@@ -15,12 +15,23 @@ def pos_num(pos_rank):
     return int(d) if d else None
 
 
-def _collect(slugs, scale, week, nick, refresh, log):
-    """First slug to mention a player wins, so callers order by authority."""
+def _collect(slugs, scale, week, nick, refresh, log, required=True):
+    """First slug to mention a player wins, so callers order by authority.
+
+    Coverage pages are optional: FantasyPros empties some of them over a season
+    (the positional draft cheatsheets, for one), and losing one only thins
+    coverage. The overall and flex boards are required.
+    """
     out = {}
     for slug in slugs:
         data = fpweb.fetch(slug, refresh=refresh)
-        sources.validate(slug, data, scale, week)
+        try:
+            sources.validate(slug, data, scale, week)
+        except RuntimeError as e:
+            if required:
+                raise
+            log(f"    {slug}.php: skipped ({e})")
+            continue
         log(f"    {slug}.php: {len(data['players']):>4}  "
             f"({data.get('scoring')}, updated {data.get('last_updated')})")
         for p in data["players"]:
@@ -40,7 +51,8 @@ def universe(ppr, week, refresh=False, log=print):
         # overall board first: it owns the cross-position rank_ecr
         overall = _collect([overall_slug], scale, week, nick, refresh, log)
         flex = _collect([flex_slug], scale, week, nick, refresh, log)
-        cov = _collect(cov_slugs + kdst_slugs, scale, week, nick, refresh, log)
+        cov = _collect(cov_slugs + kdst_slugs, scale, week, nick, refresh, log,
+                       required=False)
         scales[scale] = {"overall": overall, "flex": flex, "cov": cov}
         src = fpweb.fetch(overall_slug, refresh=refresh)
         # position_id is the board's real shape, which the slug can misreport:
