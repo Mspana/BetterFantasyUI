@@ -1,0 +1,5 @@
+# ESPN session cookies -- account credentials, do not commit
+config.json
+cache/
+data.json
+report.html
