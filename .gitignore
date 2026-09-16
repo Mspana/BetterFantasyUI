@@ -3,3 +3,5 @@ config.json
 cache/
 data.json
 report.html
+__pycache__/
+_check.js
