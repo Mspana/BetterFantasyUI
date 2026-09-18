@@ -177,6 +177,42 @@ button.mkdot.flag .d{background:var(--rise);border-color:var(--rise)}
 button.mkdot.dismiss .d{background:var(--fall);border-color:var(--fall)}
 tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #markwarn{font-size:11.5px;color:var(--fall)}
+
+.tradebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.tradegrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:720px){.tradegrid{grid-template-columns:1fr}}
+.tradecol{background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.tradecol h3{font-size:13px;text-transform:uppercase;letter-spacing:.07em;padding:9px 12px;
+  border-bottom:1px solid var(--line);background:var(--raised);display:flex;
+  justify-content:space-between;gap:8px}
+.tradecol h3 span{color:var(--muted);font-family:"IBM Plex Mono",monospace;font-size:11px}
+.tradelist{max-height:320px;overflow-y:auto}
+.trow{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--line);
+  font-size:12.5px;cursor:pointer;background:none;border-left:0;border-right:0;border-top:0;
+  width:100%;text-align:left;color:var(--ink);font-family:inherit}
+.trow:last-child{border-bottom:0}
+.trow:hover{background:var(--raised)}
+.trow[aria-pressed="true"]{background:var(--accent-soft)}
+.trow .tick{width:13px;height:13px;border:1.5px solid var(--muted);border-radius:3px;flex:0 0 auto}
+.trow[aria-pressed="true"] .tick{background:var(--accent);border-color:var(--accent)}
+.trow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .rk{font-family:"IBM Plex Mono",monospace;color:var(--muted);font-size:11.5px}
+.trow.nv .rk{color:var(--fall)}
+#tradeout{margin-top:14px;background:var(--surface);border:1px solid var(--line);
+  border-radius:6px;padding:14px}
+.verdict{font-family:Oswald,sans-serif;font-size:21px;text-transform:uppercase;letter-spacing:.04em}
+.verdict.good{color:var(--rise)} .verdict.bad{color:var(--fall)} .verdict.even{color:var(--muted)}
+.tstat{display:flex;flex-wrap:wrap;gap:18px;margin:8px 0 4px;font-size:13px}
+.tstat b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.tnote{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.55}
+.lineupcmp{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;font-size:12.5px}
+@media (max-width:560px){.lineupcmp{grid-template-columns:1fr}}
+.lineupcmp h4{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  font-family:"IBM Plex Mono",monospace;margin:0 0 5px}
+.lineupcmp li{list-style:none;padding:2px 0}
+.lineupcmp ul{margin:0;padding:0}
+.lineupcmp .inn{color:var(--rise);font-weight:600}
+.lineupcmp .outn{color:var(--fall);text-decoration:line-through}
 .mkbtns{display:inline-flex;gap:3px;margin-left:8px;vertical-align:middle}
 button.mk{cursor:pointer;font:inherit;font-size:11px;line-height:1;padding:3px 6px;
   border:1px solid var(--line);background:var(--raised);color:var(--muted);border-radius:3px}
@@ -577,6 +613,121 @@ function showMarkWarn(){
   );
 })();
 
+/* ---- trade evaluator ----
+   Value comes from the RB/WR/TE overall board, which is real FantasyPros
+   cross-position data. QB, K and D/ST have no such board, so they are shown
+   but never scored -- inventing a cross-position number for them would be
+   guesswork dressed up as arithmetic. */
+const TRADE = { partner: null, scale: "ros", give: new Set(), recv: new Set() };
+const TAU = 45;   // rank at which value decays to about 1/e of the top player
+
+function tval(p){
+  const r = p.s[TRADE.scale].sk;
+  return r ? 100 * Math.exp(-(r - 1) / TAU) : null;
+}
+
+function bestLineup(roster){
+  const sc = TRADE.scale;
+  const pool = roster.filter(p => SKILL.includes(p.p) && p.s[sc].sk != null)
+                     .sort((a, b) => a.s[sc].sk - b.s[sc].sk);
+  const picks = [], used = new Set();
+  for (const pos of SKILL){
+    let n = +(D.slots[pos] || 0);
+    for (const p of pool){
+      if (n <= 0) break;
+      if (p.p === pos && !used.has(p.k)){ picks.push(p); used.add(p.k); n--; }
+    }
+  }
+  let flex = +(D.slots.FLEX || 0);
+  for (const p of pool){
+    if (flex <= 0) break;
+    if (!used.has(p.k)){ picks.push(p); used.add(p.k); flex--; }
+  }
+  return { total: picks.reduce((t, p) => t + (tval(p) || 0), 0), picks };
+}
+
+function tradeRow(p, side){
+  const on = TRADE[side].has(p.k);
+  const v = tval(p);
+  const rk = p.s[TRADE.scale].pr || "unranked";
+  return `<button type="button" class="trow${v === null ? " nv" : ""}" data-side="${side}"
+    data-tk="${p.k}" aria-pressed="${on}">
+    <span class="tick"></span><span class="nm">${p.n}${p.ir ? " (IR)" : ""}</span>
+    <span class="rk">${rk}${v === null ? "" : " &middot; " + v.toFixed(0)}</span></button>`;
+}
+
+function renderTrade(){
+  const partners = [...new Set(D.players.filter(p => p.own && p.own !== team).map(p => p.own))].sort();
+  if (!partners.includes(TRADE.partner)) TRADE.partner = partners[0] || null;
+  $("#tpartner").innerHTML = partners.map(o =>
+    `<option value="${o}"${o === TRADE.partner ? " selected" : ""}>${o}</option>`).join("");
+  $("#tscale").value = TRADE.scale;
+
+  const sc = TRADE.scale;
+  const ord = (a, b) => (a.s[sc].sk == null ? 9999 : a.s[sc].sk) - (b.s[sc].sk == null ? 9999 : b.s[sc].sk);
+  const mine = D.players.filter(p => p.own === team).sort(ord);
+  const theirs = D.players.filter(p => p.own === TRADE.partner).sort(ord);
+  // a selection left over from a team switch would score someone not in the deal
+  TRADE.give = new Set([...TRADE.give].filter(k => mine.some(p => p.k === k)));
+  TRADE.recv = new Set([...TRADE.recv].filter(k => theirs.some(p => p.k === k)));
+
+  $("#tmine").innerHTML = mine.map(p => tradeRow(p, "give")).join("");
+  $("#ttheirs").innerHTML = theirs.map(p => tradeRow(p, "recv")).join("");
+  $("#tmineh").textContent = team;
+  $("#ttheirsh").textContent = TRADE.partner || "-";
+
+  const give = mine.filter(p => TRADE.give.has(p.k));
+  const recv = theirs.filter(p => TRADE.recv.has(p.k));
+  const out = $("#tradeout");
+  if (!give.length && !recv.length){
+    out.innerHTML = `<p class="tnote">Pick players on each side to evaluate a deal.</p>`;
+    return;
+  }
+
+  const sum = list => list.reduce((t, p) => t + (tval(p) || 0), 0);
+  const gv = sum(give), rv = sum(recv), net = rv - gv;
+  const before = bestLineup(mine);
+  const after = bestLineup(mine.filter(p => !TRADE.give.has(p.k)).concat(recv));
+  const lnet = after.total - before.total;
+
+  const beforeK = new Set(before.picks.map(p => p.k));
+  const afterK = new Set(after.picks.map(p => p.k));
+  const li = (p, cls) => `<li class="${cls}">${p.p} &middot; ${p.n} <span class="rk">${p.s[sc].pr || ""}</span></li>`;
+
+  const verdict = lnet > 3 ? ["good", "Improves your lineup"]
+                : lnet < -3 ? ["bad", "Weakens your lineup"]
+                : ["even", "Roughly a wash"];
+  const unvalued = give.concat(recv).filter(p => tval(p) === null);
+  const half = Math.round(TAU * Math.LN2);
+  const boardName = sc === "ros" ? "rest-of-season" : sc === "week" ? "weekly" : "draft-day";
+  const slotText = SKILL.map(x => (D.slots[x] || 0) + x).join(", ") +
+                   (D.slots.FLEX ? ", " + D.slots.FLEX + " FLEX" : "");
+
+  out.innerHTML = `
+    <div class="verdict ${verdict[0]}">${verdict[1]}</div>
+    <div class="tstat">
+      <span>You send <b>${gv.toFixed(0)}</b></span>
+      <span>You get <b>${rv.toFixed(0)}</b></span>
+      <span>Asset value <b class="${net > 0 ? "up-yes" : net < 0 ? "warn" : ""}">${net > 0 ? "+" : ""}${net.toFixed(0)}</b></span>
+      <span>Starting lineup <b class="${lnet > 0 ? "up-yes" : lnet < 0 ? "warn" : ""}">${lnet > 0 ? "+" : ""}${lnet.toFixed(0)}</b></span>
+    </div>
+    <div class="lineupcmp">
+      <div><h4>Lineup now &middot; ${before.total.toFixed(0)}</h4><ul>
+        ${before.picks.map(p => li(p, afterK.has(p.k) ? "" : "outn")).join("")}</ul></div>
+      <div><h4>After the trade &middot; ${after.total.toFixed(0)}</h4><ul>
+        ${after.picks.map(p => li(p, beforeK.has(p.k) ? "" : "inn")).join("")}</ul></div>
+    </div>
+    <p class="tnote">Value is <b>100 &times; e<sup>&minus;(rank&minus;1)/${TAU}</sup></b> on the
+      ${boardName} RB/WR/TE board, so the best player is worth 100 and value halves about every
+      ${half} ranks. <b>Asset value</b> counts everyone in the deal; <b>starting lineup</b> counts
+      only what you would actually start (${slotText}), which is the number that decides games.
+      Depth you never start scores in the first and not the second.${unvalued.length ?
+      " Not scored, as they have no cross-position board: " +
+      unvalued.map(p => p.n + " (" + p.p + " " + (p.s[sc].pr || "unranked") + ")").join(", ") + "." : ""}${
+      give.concat(recv).some(p => p.ir) ?
+      " A rest-of-season rank for a player on IR assumes he returns and holds the same role." : ""}</p>`;
+}
+
 /* ---- player drawer ---- */
 const byKey = {};
 D.players.forEach(p => byKey[p.k] = p);
@@ -662,10 +813,17 @@ function closePlayer(){
   if (lastFocus) lastFocus.focus();
 }
 
-function renderAll(){ renderBoard(); renderPanels(); renderRoster(); renderWaiver(); renderTable(); }
+function renderAll(){ renderBoard(); renderPanels(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
+  const trow = e.target.closest("button.trow");
+  if (trow){
+    const set = TRADE[trow.dataset.side];
+    if (set.has(trow.dataset.tk)) set.delete(trow.dataset.tk); else set.add(trow.dataset.tk);
+    renderTrade();
+    return;
+  }
   const dot = e.target.closest("button.mkdot");
   if (dot){
     // a listener left over from an older build may already have handled this
@@ -724,7 +882,11 @@ on(document, "keydown", e=>{
   const rowEl = e.target.closest && e.target.closest(".row[data-k]");
   if (rowEl && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); openPlayer(rowEl.dataset.k); }
 }, "keydown");
-on($("#team"), "change", e=>{ team = e.target.value; renderAll(); }, "team");
+on($("#team"), "change", e=>{ team = e.target.value;
+  TRADE.give.clear(); TRADE.recv.clear(); renderAll(); }, "team");
+on($("#tpartner"), "change", e=>{ TRADE.partner = e.target.value; TRADE.recv.clear(); renderTrade(); }, "tpartner");
+on($("#tscale"), "change", e=>{ TRADE.scale = e.target.value; renderTrade(); }, "tscale");
+on($("#tclear"), "click", ()=>{ TRADE.give.clear(); TRADE.recv.clear(); renderTrade(); }, "tclear");
 on($("#hide"), "change", e=>{ hideDismissed = e.target.checked; renderAll(); }, "hide");
 on($("#q"), "input", e=>{ q = e.target.value.toLowerCase().trim(); renderTable(); }, "q");
 on($("#owner"), "change", e=>{ owner = e.target.value; renderTable(); }, "owner");
@@ -791,6 +953,7 @@ def build(data, src_path):
         "myTeam": my_name,
         "size": size,
         "week": wk,
+        "slots": lg["slots"],
         "build": __import__("datetime").datetime.now().strftime("%H%M"),
         "detail": detail,
     }
@@ -882,6 +1045,28 @@ def build(data, src_path):
     </tr></thead><tbody id="wbody"></tbody></table>
   </div>
   <div class="sidegrid" id="sidetables"></div>
+
+  <h2 class="sec">Trade evaluator</h2>
+  <p class="secsub">Pick players from each roster. Scored on the rest-of-season board by default,
+    since that is the horizon a trade is made for.</p>
+  <div class="tradebar">
+    <label for="tpartner" class="eyebrow">Trade with</label>
+    <select id="tpartner"></select>
+    <label for="tscale" class="eyebrow">Board</label>
+    <select id="tscale">
+      <option value="ros">Rest of season</option>
+      <option value="week">This week</option>
+      <option value="draft">Draft day</option>
+    </select>
+    <button id="tclear" class="chip" type="button">Clear</button>
+  </div>
+  <div class="tradegrid">
+    <div class="tradecol"><h3>You send <span id="tmineh"></span></h3>
+      <div class="tradelist" id="tmine"></div></div>
+    <div class="tradecol"><h3>You get <span id="ttheirsh"></span></h3>
+      <div class="tradelist" id="ttheirs"></div></div>
+  </div>
+  <div id="tradeout"></div>
 
   <h2 class="sec">Every skill player</h2>
   <p class="secsub">Running backs, receivers and tight ends ranked against each other &mdash;
