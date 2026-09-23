@@ -177,6 +177,34 @@ button.mkdot.flag .d{background:var(--rise);border-color:var(--rise)}
 button.mkdot.dismiss .d{background:var(--fall);border-color:var(--fall)}
 tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #markwarn{font-size:11.5px;color:var(--fall)}
+/* ---- who are you ---- */
+#picker{position:fixed;inset:0;z-index:60;background:var(--paper);overflow-y:auto;
+  display:flex;flex-direction:column;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#whoami{font-family:Oswald,sans-serif;font-weight:500;text-transform:uppercase;
+  letter-spacing:.03em;text-align:center;margin:0;cursor:pointer;
+  font-size:clamp(30px,7vw,64px);line-height:1.1;padding:18px 16px 14px;
+  -webkit-user-select:none;user-select:none}
+.pgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;width:100%}
+@media (max-width:1000px){.pgrid{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:700px){.pgrid{grid-template-columns:repeat(2,1fr)}}
+.ptile{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;
+  font:inherit;color:inherit;text-align:center}
+.pshot{position:relative;width:100%;aspect-ratio:1;overflow:hidden;background:var(--raised)}
+.pshot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.pshot .p2{opacity:0;transition:opacity .12s ease}
+/* hover reveals the second photo; the heading flips them all, and hovering
+   while flipped flips that one back -- the two toggles compose */
+.ptile:hover .pshot .p2,.ptile:focus-visible .pshot .p2{opacity:1}
+.pgrid.flipped .pshot .p2{opacity:1}
+.pgrid.flipped .ptile:hover .pshot .p2,
+.pgrid.flipped .ptile:focus-visible .pshot .p2{opacity:0}
+.ptile:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+.pname{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);padding:7px 6px 12px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ptile:hover .pname{color:var(--ink)}
+@media (prefers-reduced-motion:reduce){.pshot .p2{transition:none}}
 #powerwrap table{min-width:560px}
 #powerwrap tbody tr{cursor:default}
 #powerwrap tbody tr:hover td{background:var(--raised)}
@@ -324,6 +352,10 @@ const SKILL = ["RB","WR","TE"], SIDE = ["QB","DST","K"];
 const STARTABLE = {QB:12, RB:24, WR:24, TE:12, DST:12, K:12};
 
 let scale = "week", team = D.myTeam, pos = "ALL", owner = "ALL", q = "", hideDismissed = false;
+try {
+  const saved = localStorage.getItem("fr_team");
+  if (saved && D.players.some(p => p.own === saved)) team = saved;
+} catch(e){}
 let sortKey = "sk", sortDir = 1;
 
 const sk = (p) => p.s[scale].sk;
@@ -640,6 +672,40 @@ function showMarkWarn(){
     () => { marksDoc = null; }            // degrade to local, no retry loop
   );
 })();
+
+/* ---- who are you ----
+   A first-run chooser that only sets "Viewing as". The choice is remembered
+   per browser, so it is asked once and never again on that device. */
+function renderPicker(){
+  const grid = $("#pgrid");
+  if (!grid || !(D.people || []).length) return;
+  grid.innerHTML = D.people.map(p => `<button type="button" class="ptile" data-team="${p.team}">
+      <span class="pshot">
+        <img src="${p.img}" alt="${p.name}" loading="lazy" decoding="async">
+        ${p.img2 ? `<img class="p2" src="${p.img2}" alt="" loading="lazy" decoding="async">` : ""}
+      </span>
+      <span class="pname">${p.team}</span>
+    </button>`).join("");
+}
+
+function showPicker(){
+  const el = $("#picker");
+  if (!el || !(D.people || []).length) return false;
+  renderPicker();
+  el.hidden = false;
+  return true;
+}
+
+function choose(t){
+  team = t;
+  try { localStorage.setItem("fr_team", t); } catch(e){}
+  const el = $("#picker");
+  if (el) el.hidden = true;
+  const sel = $("#team");
+  if (sel) sel.value = t;
+  TRADE.give.clear(); TRADE.recv.clear(); clearFound();
+  renderAll();
+}
 
 /* ---- league power rankings ----
    Two different questions: who fields the best starting lineup this week, and
@@ -1062,6 +1128,9 @@ function renderAll(){ renderBoard(); renderPanels(); renderPower(); renderRoster
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
+  const tile = e.target.closest(".ptile");
+  if (tile){ choose(tile.dataset.team); return; }
+  if (e.target.closest("#whoami")){ $("#pgrid").classList.toggle("flipped"); return; }
   const ps = e.target.closest("#powerwrap th[data-ps]");
   if (ps){ powerSort = ps.dataset.ps; renderPower(); return; }
   const deal = e.target.closest("button.deal");
@@ -1161,6 +1230,9 @@ document.querySelectorAll("th[data-k]").forEach(x=>{
   });
 });
 renderAll();
+try {
+  if (!localStorage.getItem("fr_team")) showPicker();
+} catch(e){ showPicker(); }
 """
 
 
@@ -1276,6 +1348,11 @@ def build(data, src_path):
 </div></header>
 
 <div class="wrap">
+  <div id="picker" hidden>
+    <h1 id="whoami" title="Click to flip every photo">Who are you</h1>
+    <div class="pgrid" id="pgrid"></div>
+  </div>
+
   <div class="grid">
     {panel("sell", "p-sell", "Sell high", "draft-day name value they no longer earn")}
     {panel("buy", "p-buy", "Buy low", "on other rosters &middot; drafted late, producing now")}

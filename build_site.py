@@ -37,7 +37,28 @@ def trim_players(payload):
     return keep
 
 
-def split(html):
+def load_people(out):
+    """Copy the prepared portraits into the site and return their manifest."""
+    src = os.path.join(HERE, "people_img")
+    man = os.path.join(src, "people.json")
+    if not os.path.exists(man):
+        return []
+    people = json.load(io.open(man, encoding="utf-8"))
+    dst = os.path.join(out, "people")
+    os.makedirs(dst, exist_ok=True)
+    for rec in people:
+        for key in ("img", "img2"):
+            rel = rec.get(key)
+            if not rel:
+                continue
+            f = os.path.basename(rel)
+            target = os.path.join(dst, f)
+            if not os.path.exists(target):
+                shutil.copy(os.path.join(src, f), target)
+    return people
+
+
+def split(html, people=None):
     """Pull the embedded payload out and rewrite the page to fetch it."""
     m = re.search(r"<script>window\.__DATA__ = (\{.*?\});</script>\s*<script>(.*?)</script>\s*$",
                   html, re.S)
@@ -51,6 +72,8 @@ def split(html):
     js = js.replace(a, "", 1)
 
     news = payload.pop("detail", {})
+    if people:
+        payload["people"] = people
     keep = trim_players(payload)
     news = {k: v for k, v in news.items() if k in keep}
 
@@ -87,7 +110,8 @@ def main(league="brunch", out=None):
     out = out or os.path.join(HERE, "site")
     os.makedirs(os.path.join(out, "img"), exist_ok=True)
 
-    html, data, news = split(io.open(src, encoding="utf-8").read())
+    people = load_people(out)
+    html, data, news = split(io.open(src, encoding="utf-8").read(), people)
 
     def write(name, obj):
         path = os.path.join(out, name)
@@ -119,6 +143,7 @@ def main(league="brunch", out=None):
     print(f"  news.json  {n2/1024:7.0f} KB  {'changed' if c2 else 'unchanged'}  "
           f"({len(news)} players)")
     print(f"  img/       {copied} new, {len(data.get('photos', {}))} referenced")
+    print(f"  people/    {len(people)} portraits")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,50 @@
+[
+ {
+  "name": "chula",
+  "team": "Gibbin in it",
+  "img": "people/chula.webp",
+  "img2": "people/chula-2.webp"
+ },
+ {
+  "name": "gibby",
+  "team": "The Matt Fundraised Conference",
+  "img": "people/gibby.webp",
+  "img2": "people/gibby-2.webp"
+ },
+ {
+  "name": "harrison",
+  "team": "Big body",
+  "img": "people/harrison.webp",
+  "img2": "people/harrison-2.webp"
+ },
+ {
+  "name": "josiah",
+  "team": "Jew England Patriots",
+  "img": "people/josiah.webp",
+  "img2": "people/josiah-2.webp"
+ },
+ {
+  "name": "julian",
+  "team": "Goyim Compliance Department",
+  "img": "people/julian.webp",
+  "img2": "people/julian-2.webp"
+ },
+ {
+  "name": "kyle",
+  "team": "Yallah Habibi",
+  "img": "people/kyle.webp",
+  "img2": "people/kyle-2.webp"
+ },
+ {
+  "name": "matt",
+  "team": "j*b",
+  "img": "people/matt.webp",
+  "img2": "people/matt-2.webp"
+ },
+ {
+  "name": "vel",
+  "team": "The Jeffries Mr. Bankers",
+  "img": "people/vel.webp",
+  "img2": "people/vel-2.webp"
+ }
+]
