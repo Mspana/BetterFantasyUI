@@ -100,7 +100,18 @@ def split(html, people=None):
         f'{js}\n'
         '</script>\n'
     )
-    return html[:m.start()] + loader, payload, news
+    # An artifact is wrapped in a skeleton that supplies the doctype, charset
+    # and viewport. Pages serves this file raw, so without these a phone
+    # assumes a 980px viewport -- skipping the 2-column rule -- and the whole
+    # page renders in quirks mode.
+    head = (
+        '<!doctype html>\n'
+        '<html lang="en">\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1, '
+        'viewport-fit=cover">\n'
+    )
+    return head + html[:m.start()] + loader, payload, news
 
 
 def main(league="brunch", out=None):

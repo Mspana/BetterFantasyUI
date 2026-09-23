@@ -59,7 +59,11 @@ CSS = """
   --shadow:0 1px 2px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box}
-body{background:var(--paper);color:var(--ink);
+/* Every wide table scrolls inside its own container, so the page itself never
+   needs to scroll sideways; clamp it so nothing can widen the layout viewport
+   under a phone. */
+html{overflow-x:hidden}
+body{overflow-x:hidden;background:var(--paper);color:var(--ink);
   font-family:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;
   line-height:1.45;margin:0}
 .wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:0 56px}
@@ -70,9 +74,19 @@ h1,h2,h3,.dname{font-family:Oswald,"Arial Narrow",Haettenschweiler,sans-serif;
 .num{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   font-variant-numeric:tabular-nums}
 
+/* The league photo runs above the masthead. It is shown whole rather than
+   cropped -- it carries the league name and everyone's faces, and a banner
+   crop would cut one or the other. */
+.banner{background:var(--ink);display:flex;justify-content:center}
+.banner img{display:block;width:100%;max-width:550px;height:auto}
+@media (max-width:700px){.banner img{max-width:100%}}
 header.top{border-bottom:1px solid var(--line);background:var(--surface);
-  padding-block:22px 0;margin-bottom:22px}
-header.top h1{font-size:clamp(26px,4.4vw,38px);text-transform:uppercase;line-height:1.05}
+  padding-block:16px 0;margin-bottom:22px}
+/* The league name lives in the banner image now. The h1 stays in the markup
+   but out of sight, so the page keeps a real heading for screen readers and
+   search without printing the name twice. */
+.vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .sub{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:13px;color:var(--muted)}
 .sub b{color:var(--ink);font-weight:600}
 .scalebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:16px;
@@ -210,8 +224,12 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #schmove{margin-top:14px}
 @media (prefers-reduced-motion:reduce){#schbtn .caret{transition:none}}
 /* ---- who are you ---- */
-#picker{position:fixed;inset:0;z-index:60;background:var(--paper);overflow-y:auto;
-  display:flex;flex-direction:column;
+/* Block, not flex. As a column flex container this shrank the grid whenever
+   the tiles were taller than the window -- flex items shrink by default -- and
+   .pshot clips its images, so they vanished instead of scrolling. Whether it
+   happened depended on viewport height, which is why it came and went. */
+#picker{position:fixed;inset:0;z-index:60;background:var(--paper);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
   padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 #whoami{font-family:Oswald,sans-serif;font-weight:500;text-transform:uppercase;
   letter-spacing:.03em;text-align:center;margin:0;cursor:pointer;
@@ -221,7 +239,8 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 @media (max-width:1000px){.pgrid{grid-template-columns:repeat(3,1fr)}}
 @media (max-width:700px){.pgrid{grid-template-columns:repeat(2,1fr)}}
 .ptile{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;
-  font:inherit;color:inherit;text-align:center}
+  font:inherit;color:inherit;text-align:center;touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent}
 /* both are spans inside a button: without display:block they stay inline,
    width and aspect-ratio do not apply, and the whole tile collapses */
 .pshot{display:block;position:relative;width:100%;aspect-ratio:1;overflow:hidden;
@@ -230,10 +249,18 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 .pshot .p2{opacity:0;transition:opacity .12s ease}
 /* hover reveals the second photo; the heading flips them all, and hovering
    while flipped flips that one back -- the two toggles compose */
-.ptile:hover .pshot .p2,.ptile:focus-visible .pshot .p2{opacity:1}
+/* Hover rules only where a pointer can actually hover: on a touchscreen
+   :hover sticks after a tap and the photo never changes back. */
+@media (hover:hover){
+  .ptile:hover .pshot .p2{opacity:1}
+  .pgrid.flipped .ptile:hover .pshot .p2{opacity:0}
+}
+.ptile:focus-visible .pshot .p2{opacity:1}
 .pgrid.flipped .pshot .p2{opacity:1}
-.pgrid.flipped .ptile:hover .pshot .p2,
 .pgrid.flipped .ptile:focus-visible .pshot .p2{opacity:0}
+/* Touch: held down shows the second photo, releasing picks the team. */
+.ptile.pressing .pshot .p2{opacity:1}
+.pgrid.flipped .ptile.pressing .pshot .p2{opacity:0}
 .ptile:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
 /* NOT .pname -- that class already labels every player name in the tables,
    and this rule comes later in the sheet, so it would restyle all of them */
@@ -779,6 +806,29 @@ function toggleSchmove(force){
   try { localStorage.setItem("fr_schmove", open ? "1" : "0"); } catch(e){}
 }
 
+/* Touch picking: press shows the other photo, release selects. A tap also
+   fires a click afterwards, so the click is swallowed once to avoid picking
+   twice; mouse and keyboard still go through click as normal. */
+let swallowClick = false;
+
+function pressOn(e){
+  const tile = e.target.closest(".ptile");
+  if (tile) tile.classList.add("pressing");
+}
+function pressOff(e){
+  const tile = e.target.closest(".ptile");
+  if (tile) tile.classList.remove("pressing");
+}
+function pressPick(e){
+  const tile = e.target.closest(".ptile");
+  if (!tile) return;
+  tile.classList.remove("pressing");
+  if (e.pointerType === "touch" || e.pointerType === "pen"){
+    swallowClick = true;
+    choose(tile.dataset.team);
+  }
+}
+
 /* ---- league power rankings ----
    Two different questions: who fields the best starting lineup this week, and
    who holds the most value overall. A team can lead one and trail the other --
@@ -1207,7 +1257,11 @@ on(document, "click", e=>{
   if (e.target.closest("#whoisit")){ showPicker(); return; }
   if (e.target.closest("#schbtn")){ toggleSchmove(); return; }
   const tile = e.target.closest(".ptile");
-  if (tile){ choose(tile.dataset.team); return; }
+  if (tile){
+    if (swallowClick){ swallowClick = false; return; }
+    choose(tile.dataset.team);
+    return;
+  }
   if (e.target.closest("#whoami")){ $("#pgrid").classList.toggle("flipped"); return; }
   const ps = e.target.closest("#powerwrap th[data-ps]");
   if (ps){ powerSort = ps.dataset.ps; renderPower(); return; }
@@ -1294,6 +1348,10 @@ on($("#team"), "change", e=>{ team = e.target.value;
   TRADE.give.clear(); TRADE.recv.clear(); clearFound(); renderAll(); }, "team");
 on($("#tpartner"), "change", e=>{ TRADE.partner = e.target.value; TRADE.recv.clear(); renderTrade(); }, "tpartner");
 on($("#tscale"), "change", e=>{ TRADE.scale = e.target.value; clearFound(); renderTrade(); }, "tscale");
+on(document, "pointerdown", pressOn, "pdown");
+on(document, "pointerup", pressPick, "pup");
+on(document, "pointercancel", pressOff, "pcancel");
+on(document, "pointerleave", pressOff, "pleave");
 on($("#findbtn"), "click", runFinder, "findbtn");
 on($("#tclear"), "click", ()=>{ TRADE.give.clear(); TRADE.recv.clear(); renderTrade(); }, "tclear");
 on($("#hide"), "change", e=>{ hideDismissed = e.target.checked; renderAll(); }, "hide");
@@ -1438,9 +1496,10 @@ def build(data, src_path):
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>{CSS}</style>
 
+<div class="banner"><img src="og.jpg" alt="{esc(lg['name'])} fantasy football" width="1200" height="630"></div>
 <header class="top"><div class="wrap">
   <p class="eyebrow">FantasyPros consensus &middot; {data['season']} season</p>
-  <h1>{esc(lg['name'])}</h1>
+  <h1 class="vh">{esc(lg['name'])}</h1>
   <div class="sub">
     <span><b>{size}</b> teams</span><span><b>{ppr}</b></span>
     <span><b>{fmt}</b> &middot; {esc(starters)}</span>
