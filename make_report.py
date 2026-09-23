@@ -646,6 +646,48 @@ function tval(p){
   return r ? 100 * Math.exp(-(r - 1) / TAU) : null;
 }
 
+/* A 2-for-1 frees a roster spot, and that spot is worth the best player still
+   on waivers -- which in a shallow league is a real asset. A 1-for-2 costs a
+   spot instead and forces a drop. Both sides of a deal get the same treatment. */
+function faPool(){
+  const sc = TRADE.scale;
+  if (!FR.fa || FR.fa.scale !== sc){
+    FR.fa = { scale: sc,
+      list: D.players.filter(p => !p.own && SKILL.includes(p.p) && p.s[sc].sk != null)
+                     .sort((a, b) => a.s[sc].sk - b.s[sc].sk) };
+  }
+  return FR.fa.list;
+}
+
+function topFA(n, roster){
+  const held = new Set(roster.map(p => p.k));
+  const out = [];
+  for (const p of faPool()){
+    if (held.has(p.k)) continue;
+    out.push(p);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+/* roster after sending `out` and receiving `inn`, with freed spots filled from
+   waivers and surplus bodies dropped */
+function settle(roster, out, inn){
+  const outK = new Set(out.map(p => p.k));
+  let r = roster.filter(p => !outK.has(p.k)).concat(inn);
+  const spare = out.length - inn.length;
+  if (spare > 0) return { roster: r.concat(topFA(spare, r)), adds: topFA(spare, r) };
+  if (spare < 0){
+    const innK = new Set(inn.map(p => p.k));
+    const cuts = r.filter(p => !innK.has(p.k) && SKILL.includes(p.p))
+                  .sort((a, b) => (tval(a) || 0) - (tval(b) || 0))
+                  .slice(0, -spare);
+    const cutK = new Set(cuts.map(p => p.k));
+    return { roster: r.filter(p => !cutK.has(p.k)), adds: [], cuts };
+  }
+  return { roster: r, adds: [] };
+}
+
 function bestLineup(roster){
   const sc = TRADE.scale;
   const pool = roster.filter(p => SKILL.includes(p.p) && p.s[sc].sk != null)
@@ -705,20 +747,24 @@ function renderTrade(){
   }
 
   const sum = list => list.reduce((t, p) => t + (tval(p) || 0), 0);
-  const gv = sum(give), rv = sum(recv), net = rv - gv;
+  const gv = sum(give), rv = sum(recv);
   const before = bestLineup(mine);
-  const after = bestLineup(mine.filter(p => !TRADE.give.has(p.k)).concat(recv));
+  const mySettled = settle(mine, give, recv);
+  const after = bestLineup(mySettled.roster);
   const lnet = after.total - before.total;
+  const fill = mySettled.adds || [], cuts = mySettled.cuts || [];
   // the same sum from the other manager's chair: a deal that hurts them is a
   // deal they decline, however good it looks from here
   const tBefore = bestLineup(theirs);
-  const tAfter = bestLineup(theirs.filter(p => !TRADE.recv.has(p.k)).concat(give));
+  const tAfter = bestLineup(settle(theirs, recv, give).roster);
   const tnet = tAfter.total - tBefore.total;
 
   const beforeK = new Set(before.picks.map(p => p.k));
   const afterK = new Set(after.picks.map(p => p.k));
   const li = (p, cls) => `<li class="${cls}">${p.p} &middot; ${p.n} <span class="rk">${p.s[sc].pr || ""}</span></li>`;
 
+  const fillV = sum(fill), cutV = sum(cuts);
+  const netAll = rv + fillV - gv - cutV;
   const mineUp = lnet > 3, mineDown = lnet < -3;
   const themUp = tnet > 3, themDown = tnet < -3;
   const verdict = mineDown ? ["bad", "Weakens your lineup"]
@@ -740,7 +786,8 @@ function renderTrade(){
     <div class="tstat">
       <span>You send <b>${gv.toFixed(0)}</b></span>
       <span>You get <b>${rv.toFixed(0)}</b></span>
-      <span>Asset value <b class="${net > 0 ? "up-yes" : net < 0 ? "warn" : ""}">${net > 0 ? "+" : ""}${net.toFixed(0)}</b></span>
+      <span>You get <b>${fillV.toFixed(0)}</b> off waivers</span>
+      <span>Asset value <b class="${netAll > 0 ? "up-yes" : netAll < 0 ? "warn" : ""}">${netAll > 0 ? "+" : ""}${netAll.toFixed(0)}</b></span>
       <span>Your lineup <b class="${lnet > 0 ? "up-yes" : lnet < 0 ? "warn" : ""}">${lnet > 0 ? "+" : ""}${lnet.toFixed(1)}</b></span>
       <span>Their lineup <b class="${tnet > 0 ? "up-yes" : tnet < 0 ? "warn" : ""}">${tnet > 0 ? "+" : ""}${tnet.toFixed(1)}</b></span>
     </div>
@@ -757,7 +804,12 @@ function renderTrade(){
       ${boardName} RB/WR/TE board, so the best player is worth 100 and value halves about every
       ${half} ranks. <b>Asset value</b> counts everyone in the deal; <b>starting lineup</b> counts
       only what you would actually start (${slotText}), which is the number that decides games.
-      Depth you never start scores in the first and not the second.${unvalued.length ?
+      Depth you never start scores in the first and not the second.${fill.length ?
+      " Sending " + give.length + " for " + recv.length + " frees " + fill.length +
+      " roster spot" + (fill.length > 1 ? "s" : "") + ", credited at the best player still on waivers: " +
+      fill.map(p => p.n + " (" + (p.s[sc].pr || "") + ")").join(", ") + "." : ""}${cuts.length ?
+      " Taking " + recv.length + " for " + give.length + " costs a roster spot, so " +
+      cuts.map(p => p.n).join(", ") + " would have to be dropped." : ""}${unvalued.length ?
       " Not scored, as they have no cross-position board: " +
       unvalued.map(p => p.n + " (" + p.p + " " + (p.s[sc].pr || "unranked") + ")").join(", ") + "." : ""}${
       give.concat(recv).some(p => p.ir) ?
@@ -793,13 +845,11 @@ function findTrades(){
     const rsets = combos(rank(theirs), 1).concat(combos(rank(theirs), 2));
     const here = [];
     for (const g of gsets){
-      const myKept = mine.filter(p => !g.includes(p));
-      const theirPlus = theirs.concat(g);
       for (const r of rsets){
         if (Math.abs(g.length - r.length) > 1) continue;   // keep roster sizes sane
-        const myGain = bestLineup(myKept.concat(r)).total - myBase;
+        const myGain = bestLineup(settle(mine, g, r).roster).total - myBase;
         if (myGain < MIN) continue;
-        const theirGain = bestLineup(theirPlus.filter(p => !r.includes(p))).total - theirBase;
+        const theirGain = bestLineup(settle(theirs, r, g).roster).total - theirBase;
         if (theirGain < MIN) continue;
         here.push({ tm, g, r, myGain, theirGain });
       }
@@ -848,6 +898,7 @@ function renderFound(list){
 
 function clearFound(){
   FR.deals = null;
+  FR.fa = null;
   const box = $("#findout");
   if (box) box.innerHTML = "";
   const note = $("#findnote");
