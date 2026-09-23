@@ -235,12 +235,17 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
   letter-spacing:.03em;text-align:center;margin:0;cursor:pointer;
   font-size:clamp(30px,7vw,64px);line-height:1.1;padding:18px 16px 14px;
   -webkit-user-select:none;user-select:none}
-.pgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;width:100%}
-@media (max-width:1000px){.pgrid{grid-template-columns:repeat(3,1fr)}}
-@media (max-width:700px){.pgrid{grid-template-columns:repeat(2,1fr)}}
+/* minmax(0,1fr), not 1fr: a bare 1fr floors each track at the item's
+   min-content width, and the captions do not wrap -- so a long team name
+   ("The Matt Fundraised Conference") made its column wider than the others
+   and pushed the grid off the screen. */
+.pgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;width:100%}
+@media (max-width:1000px){.pgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:700px){.pgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .ptile{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;
   font:inherit;color:inherit;text-align:center;touch-action:manipulation;
-  -webkit-tap-highlight-color:transparent}
+  -webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+.pshot img{-webkit-user-drag:none;user-drag:none;pointer-events:none}
 /* both are spans inside a button: without display:block they stay inline,
    width and aspect-ratio do not apply, and the whole tile collapses */
 .pshot{display:block;position:relative;width:100%;aspect-ratio:1;overflow:hidden;
@@ -264,9 +269,11 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 .ptile:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
 /* NOT .pname -- that class already labels every player name in the tables,
    and this rule comes later in the sheet, so it would restyle all of them */
-.ptname{display:block;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--muted);padding:7px 6px 12px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Wrap rather than truncate: at phone width a track is under 200px and the
+   longer team names would read "THE MATT FUNDRAISED CONFERENC...". */
+.ptname{display:block;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);padding:7px 8px 12px;line-height:1.35;
+  overflow-wrap:anywhere}
 .ptile:hover .ptname{color:var(--ink)}
 @media (prefers-reduced-motion:reduce){.pshot .p2{transition:none}}
 #powerwrap table{min-width:560px}
@@ -809,20 +816,39 @@ function toggleSchmove(force){
 /* Touch picking: press shows the other photo, release selects. A tap also
    fires a click afterwards, so the click is swallowed once to avoid picking
    twice; mouse and keyboard still go through click as normal. */
-let swallowClick = false;
+let swallowClick = false, pressed = null, pressAt = null;
+const DRAG = 10;      // px of travel that turns a tap into a drag or a scroll
+let dragged = false;
+
+function clearPress(){
+  if (pressed) pressed.classList.remove("pressing");
+  pressed = null;
+  pressAt = null;
+}
 
 function pressOn(e){
   const tile = e.target.closest(".ptile");
-  if (tile) tile.classList.add("pressing");
+  if (!tile) return;
+  pressed = tile;
+  pressAt = { x: e.clientX, y: e.clientY };
+  tile.classList.add("pressing");
 }
-function pressOff(e){
-  const tile = e.target.closest(".ptile");
-  if (tile) tile.classList.remove("pressing");
+
+/* A drag past the threshold is a scroll or a swipe, not a pick. Without this
+   the release lands on whatever tile is under the finger and chooses it. */
+function pressMove(e){
+  if (!pressed || !pressAt) return;
+  if (Math.abs(e.clientX - pressAt.x) > DRAG || Math.abs(e.clientY - pressAt.y) > DRAG){
+    dragged = true;
+    clearPress();
+  }
 }
+
 function pressPick(e){
   const tile = e.target.closest(".ptile");
-  if (!tile) return;
-  tile.classList.remove("pressing");
+  const started = pressed;
+  clearPress();
+  if (!tile || tile !== started) return;      // released somewhere else: no pick
   if (e.pointerType === "touch" || e.pointerType === "pen"){
     swallowClick = true;
     choose(tile.dataset.team);
@@ -1259,6 +1285,8 @@ on(document, "click", e=>{
   const tile = e.target.closest(".ptile");
   if (tile){
     if (swallowClick){ swallowClick = false; return; }
+    if (e.detail && dragged){ dragged = false; return; }   // mouse drag, not a click
+    dragged = false;
     choose(tile.dataset.team);
     return;
   }
@@ -1349,9 +1377,10 @@ on($("#team"), "change", e=>{ team = e.target.value;
 on($("#tpartner"), "change", e=>{ TRADE.partner = e.target.value; TRADE.recv.clear(); renderTrade(); }, "tpartner");
 on($("#tscale"), "change", e=>{ TRADE.scale = e.target.value; clearFound(); renderTrade(); }, "tscale");
 on(document, "pointerdown", pressOn, "pdown");
+on(document, "pointermove", pressMove, "pmove");
 on(document, "pointerup", pressPick, "pup");
-on(document, "pointercancel", pressOff, "pcancel");
-on(document, "pointerleave", pressOff, "pleave");
+on(document, "pointercancel", clearPress, "pcancel");
+on(window, "blur", clearPress, "pblur");
 on($("#findbtn"), "click", runFinder, "findbtn");
 on($("#tclear"), "click", ()=>{ TRADE.give.clear(); TRADE.recv.clear(); renderTrade(); }, "tclear");
 on($("#hide"), "change", e=>{ hideDismissed = e.target.checked; renderAll(); }, "hide");
