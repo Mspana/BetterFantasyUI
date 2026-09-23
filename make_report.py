@@ -177,6 +177,26 @@ button.mkdot.flag .d{background:var(--rise);border-color:var(--rise)}
 button.mkdot.dismiss .d{background:var(--fall);border-color:var(--fall)}
 tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #markwarn{font-size:11.5px;color:var(--fall)}
+.whoisit{display:flex;align-items:center;gap:9px;cursor:pointer;font:inherit;color:var(--ink);
+  background:var(--accent-soft);border:1px solid var(--accent);border-radius:4px;
+  padding:4px 12px 4px 4px}
+.whoisit img{width:32px;height:32px;border-radius:3px;object-fit:cover;display:block;
+  background:var(--raised)}
+.whoisit span{font-family:Oswald,sans-serif;font-size:14px;letter-spacing:.04em}
+.whoisit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#schbtn{font-family:Oswald,sans-serif;font-size:17px;letter-spacing:.06em;
+  text-transform:uppercase;cursor:pointer;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);border-radius:6px;
+  padding:11px 18px;display:flex;align-items:center;gap:10px;width:100%;
+  box-shadow:var(--shadow);margin-top:4px}
+#schbtn:hover{background:var(--raised)}
+#schbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#schbtn .caret{color:var(--muted);font-size:12px;transition:transform .15s ease}
+#schbtn[aria-expanded="true"] .caret{transform:rotate(90deg)}
+#schbtn .hint{margin-left:auto;font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;
+  letter-spacing:0;text-transform:none;color:var(--muted)}
+#schmove{margin-top:14px}
+@media (prefers-reduced-motion:reduce){#schbtn .caret{transition:none}}
 /* ---- who are you ---- */
 #picker{position:fixed;inset:0;z-index:60;background:var(--paper);overflow-y:auto;
   display:flex;flex-direction:column;
@@ -707,6 +727,35 @@ function choose(t){
   renderAll();
 }
 
+/* The portrait stands in for the Viewing-as dropdown once we know who is who;
+   clicking it reopens the chooser over the page, never reloading it. */
+function renderWho(){
+  const btn = $("#whoisit"), sel = $("#team"), lab = $("#valabel");
+  if (!btn) return;
+  const me = (D.people || []).find(p => p.team === team);
+  if (!me){
+    btn.hidden = true;
+    if (sel) sel.hidden = false;
+    if (lab) lab.hidden = false;
+    return;
+  }
+  $("#whoimg").src = me.img;
+  $("#whoimg").alt = me.name;
+  $("#whotxt").textContent = me.team;
+  btn.hidden = false;
+  if (sel) sel.hidden = true;
+  if (lab) lab.hidden = true;
+}
+
+function toggleSchmove(force){
+  const box = $("#schmove"), btn = $("#schbtn");
+  if (!box || !btn) return;
+  const open = force === undefined ? box.hidden : force;
+  box.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+  try { localStorage.setItem("fr_schmove", open ? "1" : "0"); } catch(e){}
+}
+
 /* ---- league power rankings ----
    Two different questions: who fields the best starting lineup this week, and
    who holds the most value overall. A team can lead one and trail the other --
@@ -1124,10 +1173,12 @@ function closePlayer(){
   if (lastFocus) lastFocus.focus();
 }
 
-function renderAll(){ renderBoard(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
+function renderAll(){ renderBoard(); renderWho(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
+  if (e.target.closest("#whoisit")){ showPicker(); return; }
+  if (e.target.closest("#schbtn")){ toggleSchmove(); return; }
   const tile = e.target.closest(".ptile");
   if (tile){ choose(tile.dataset.team); return; }
   if (e.target.closest("#whoami")){ $("#pgrid").classList.toggle("flipped"); return; }
@@ -1230,6 +1281,9 @@ document.querySelectorAll("th[data-k]").forEach(x=>{
   });
 });
 renderAll();
+try {
+  toggleSchmove(localStorage.getItem("fr_schmove") === "1");
+} catch(e){ toggleSchmove(false); }
 try {
   if (!localStorage.getItem("fr_team")) showPicker();
 } catch(e){ showPicker(); }
@@ -1340,7 +1394,10 @@ def build(data, src_path):
   <div class="scalebar">
     {sbtns}
     <div class="teampick">
-      <label for="team">Viewing as</label>
+      <label for="team" id="valabel">Viewing as</label>
+      <button type="button" class="whoisit" id="whoisit" hidden>
+        <img id="whoimg" alt=""><span id="whotxt"></span>
+      </button>
       <select id="team">{team_opts}</select>
     </div>
     <p class="boardnote" id="boardnote"></p>
@@ -1353,13 +1410,18 @@ def build(data, src_path):
     <div class="pgrid" id="pgrid"></div>
   </div>
 
-  <div class="grid">
-    {panel("sell", "p-sell", "Sell high", "draft-day name value they no longer earn")}
-    {panel("buy", "p-buy", "Buy low", "on other rosters &middot; drafted late, producing now")}
-    {panel("adds", "p-adds", "Waiver adds", "free agents above the weakest starter")}
-    {panel("drops", "p-drops", "Drop candidates", "below the best free agent at that spot")}
+  <button type="button" id="schbtn" aria-expanded="false" aria-controls="schmove">
+    <span class="caret">&#9654;</span>Schmovement<span class="hint">who to add, buy, drop and sell</span>
+  </button>
+  <div id="schmove" hidden>
+    <div class="grid">
+      {panel("adds", "p-adds", "Waiver adds", "free agents above the weakest starter")}
+      {panel("buy", "p-buy", "Buy low", "rose in value")}
+      {panel("drops", "p-drops", "Drop candidates", "below the best free agent at that spot")}
+      {panel("sell", "p-sell", "Sell high", "idk what happened")}
+    </div>
+    {panel("", "p-stash", "IR stash", "costs no active roster spot")}
   </div>
-  {panel("", "p-stash", "IR stash", "costs no active roster spot")}
 
   <h2 class="sec">League power rankings</h2>
   <p class="secsub">Every roster scored on the board selected at the top.
