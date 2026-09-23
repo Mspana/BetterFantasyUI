@@ -177,6 +177,26 @@ button.mkdot.flag .d{background:var(--rise);border-color:var(--rise)}
 button.mkdot.dismiss .d{background:var(--fall);border-color:var(--fall)}
 tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #markwarn{font-size:11.5px;color:var(--fall)}
+#findbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
+#findbtn{font-family:Oswald,sans-serif;font-size:14px;letter-spacing:.05em;text-transform:uppercase;
+  cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);
+  border-radius:4px;padding:8px 16px}
+#findbtn[disabled]{opacity:.6;cursor:default}
+#findnote{font-size:12px;color:var(--muted)}
+.deal{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;
+  background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--rise);
+  border-radius:5px;padding:10px 12px;margin-bottom:8px;color:var(--ink)}
+.deal:hover{background:var(--raised)}
+.deal:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.deal .who{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.deal .legs{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline}
+.deal .leg{font-size:13.5px}
+.deal .leg b{font-family:Oswald,sans-serif;font-weight:500;font-size:15px}
+.deal .arrow{color:var(--muted)}
+.deal .gains{margin-top:6px;font-size:12px;color:var(--muted);
+  font-family:"IBM Plex Mono",monospace}
+.deal .gains b{color:var(--rise)}
 
 .tradebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 .tradegrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -689,14 +709,26 @@ function renderTrade(){
   const before = bestLineup(mine);
   const after = bestLineup(mine.filter(p => !TRADE.give.has(p.k)).concat(recv));
   const lnet = after.total - before.total;
+  // the same sum from the other manager's chair: a deal that hurts them is a
+  // deal they decline, however good it looks from here
+  const tBefore = bestLineup(theirs);
+  const tAfter = bestLineup(theirs.filter(p => !TRADE.recv.has(p.k)).concat(give));
+  const tnet = tAfter.total - tBefore.total;
 
   const beforeK = new Set(before.picks.map(p => p.k));
   const afterK = new Set(after.picks.map(p => p.k));
   const li = (p, cls) => `<li class="${cls}">${p.p} &middot; ${p.n} <span class="rk">${p.s[sc].pr || ""}</span></li>`;
 
-  const verdict = lnet > 3 ? ["good", "Improves your lineup"]
-                : lnet < -3 ? ["bad", "Weakens your lineup"]
+  const mineUp = lnet > 3, mineDown = lnet < -3;
+  const themUp = tnet > 3, themDown = tnet < -3;
+  const verdict = mineDown ? ["bad", "Weakens your lineup"]
+                : mineUp && themDown ? ["even", "Good for you, bad for them"]
+                : mineUp && themUp ? ["good", "Helps both sides"]
+                : mineUp ? ["good", "Improves your lineup"]
                 : ["even", "Roughly a wash"];
+  const likely = themDown ? "They lose ground here, so expect a no."
+               : themUp ? "It helps them too, so this one is realistic."
+               : "About neutral for them, so it may come down to preference.";
   const unvalued = give.concat(recv).filter(p => tval(p) === null);
   const half = Math.round(TAU * Math.LN2);
   const boardName = sc === "ros" ? "rest-of-season" : sc === "week" ? "weekly" : "draft-day";
@@ -709,14 +741,18 @@ function renderTrade(){
       <span>You send <b>${gv.toFixed(0)}</b></span>
       <span>You get <b>${rv.toFixed(0)}</b></span>
       <span>Asset value <b class="${net > 0 ? "up-yes" : net < 0 ? "warn" : ""}">${net > 0 ? "+" : ""}${net.toFixed(0)}</b></span>
-      <span>Starting lineup <b class="${lnet > 0 ? "up-yes" : lnet < 0 ? "warn" : ""}">${lnet > 0 ? "+" : ""}${lnet.toFixed(0)}</b></span>
+      <span>Your lineup <b class="${lnet > 0 ? "up-yes" : lnet < 0 ? "warn" : ""}">${lnet > 0 ? "+" : ""}${lnet.toFixed(1)}</b></span>
+      <span>Their lineup <b class="${tnet > 0 ? "up-yes" : tnet < 0 ? "warn" : ""}">${tnet > 0 ? "+" : ""}${tnet.toFixed(1)}</b></span>
     </div>
+    <p class="tnote" style="margin-top:0">${likely}</p>
     <div class="lineupcmp">
       <div><h4>Lineup now &middot; ${before.total.toFixed(0)}</h4><ul>
         ${before.picks.map(p => li(p, afterK.has(p.k) ? "" : "outn")).join("")}</ul></div>
       <div><h4>After the trade &middot; ${after.total.toFixed(0)}</h4><ul>
         ${after.picks.map(p => li(p, beforeK.has(p.k) ? "" : "inn")).join("")}</ul></div>
     </div>
+    <p class="tnote"><b>${TRADE.partner}</b> goes ${tBefore.total.toFixed(0)}
+      &rarr; ${tAfter.total.toFixed(0)} (${tnet > 0 ? "+" : ""}${tnet.toFixed(1)}).</p>
     <p class="tnote">Value is <b>100 &times; e<sup>&minus;(rank&minus;1)/${TAU}</sup></b> on the
       ${boardName} RB/WR/TE board, so the best player is worth 100 and value halves about every
       ${half} ranks. <b>Asset value</b> counts everyone in the deal; <b>starting lineup</b> counts
@@ -726,6 +762,113 @@ function renderTrade(){
       unvalued.map(p => p.n + " (" + p.p + " " + (p.s[sc].pr || "unranked") + ")").join(", ") + "." : ""}${
       give.concat(recv).some(p => p.ir) ?
       " A rest-of-season rank for a player on IR assumes he returns and holds the same role." : ""}</p>`;
+}
+
+/* ---- recommended trades ----
+   Scans every rival roster for deals that raise BOTH starting lineups. A trade
+   that only helps you is one the other manager declines, so one-sided deals are
+   not worth listing. */
+function combos(arr, n){
+  if (n === 1) return arr.map(x => [x]);
+  const out = [];
+  for (let i = 0; i < arr.length; i++)
+    for (let j = i + 1; j < arr.length; j++) out.push([arr[i], arr[j]]);
+  return out;
+}
+
+function findTrades(){
+  const sc = TRADE.scale, POOL = 12, MIN = 1.0, PER_TEAM = 2;
+  const mine = D.players.filter(p => p.own === team);
+  const myBase = bestLineup(mine).total;
+  const rank = list => list.filter(p => SKILL.includes(p.p) && p.s[sc].sk != null)
+                           .sort((a, b) => a.s[sc].sk - b.s[sc].sk).slice(0, POOL);
+  const A = rank(mine);
+  const gsets = combos(A, 1).concat(combos(A, 2));
+  const partners = [...new Set(D.players.filter(p => p.own && p.own !== team).map(p => p.own))];
+  const found = [];
+
+  for (const tm of partners){
+    const theirs = D.players.filter(p => p.own === tm);
+    const theirBase = bestLineup(theirs).total;
+    const rsets = combos(rank(theirs), 1).concat(combos(rank(theirs), 2));
+    const here = [];
+    for (const g of gsets){
+      const myKept = mine.filter(p => !g.includes(p));
+      const theirPlus = theirs.concat(g);
+      for (const r of rsets){
+        if (Math.abs(g.length - r.length) > 1) continue;   // keep roster sizes sane
+        const myGain = bestLineup(myKept.concat(r)).total - myBase;
+        if (myGain < MIN) continue;
+        const theirGain = bestLineup(theirPlus.filter(p => !r.includes(p))).total - theirBase;
+        if (theirGain < MIN) continue;
+        here.push({ tm, g, r, myGain, theirGain });
+      }
+    }
+    // best first, and on a tie prefer the deal that moves fewer players
+    here.sort((x, y) => (y.myGain + y.theirGain) - (x.myGain + x.theirGain)
+                     || (x.g.length + x.r.length) - (y.g.length + y.r.length));
+    // dedupe on BOTH sides: the same haul for a bigger package is not a
+    // second option, it is the same option with a worse price
+    const seenG = new Set(), seenR = new Set();
+    let kept = 0;
+    for (const t of here){
+      const kg = t.g.map(p => p.k).sort().join("|");
+      const kr = t.r.map(p => p.k).sort().join("|");
+      if (seenG.has(kg) || seenR.has(kr)) continue;
+      seenG.add(kg); seenR.add(kr);
+      found.push(t);
+      if (++kept >= PER_TEAM) break;
+    }
+  }
+  found.sort((x, y) => y.myGain - x.myGain);
+  return found.slice(0, 12);
+}
+
+function renderFound(list){
+  const sc = TRADE.scale;
+  const box = $("#findout");
+  if (!list.length){
+    box.innerHTML = `<p class="tnote">No trade found that improves both lineups on this board.
+      That usually means your starters are already the best fit for what the league holds --
+      try the weekly board, or build one by hand above.</p>`;
+    return;
+  }
+  const names = l => l.map(p => `<b>${p.n}</b> <span class="arrow">${p.s[sc].pr || ""}</span>`).join(" + ");
+  box.innerHTML = list.map((t, i) => `<button type="button" class="deal" data-deal="${i}">
+      <div class="who">${t.tm}</div>
+      <div class="legs">
+        <span class="leg">Get ${names(t.r)}</span>
+        <span class="arrow">&larr;</span>
+        <span class="leg">Send ${names(t.g)}</span>
+      </div>
+      <div class="gains">you <b>+${t.myGain.toFixed(1)}</b> &middot; them +${t.theirGain.toFixed(1)}</div>
+    </button>`).join("");
+  FR.deals = list;
+}
+
+function clearFound(){
+  FR.deals = null;
+  const box = $("#findout");
+  if (box) box.innerHTML = "";
+  const note = $("#findnote");
+  if (note) note.textContent = "";
+}
+
+function runFinder(){
+  const btn = $("#findbtn");
+  btn.disabled = true;
+  $("#findnote").textContent = "Scanning every roster...";
+  // let the button repaint before the scan blocks the thread
+  setTimeout(() => {
+    const t0 = performance.now();
+    const list = findTrades();
+    renderFound(list);
+    $("#findnote").textContent =
+      `${list.length} mutually useful deal${list.length === 1 ? "" : "s"} on the ` +
+      (TRADE.scale === "ros" ? "rest-of-season" : TRADE.scale === "week" ? "weekly" : "draft-day") +
+      ` board (${Math.round(performance.now() - t0)} ms). Click one to load it above.`;
+    btn.disabled = false;
+  }, 30);
 }
 
 /* ---- player drawer ---- */
@@ -817,6 +960,20 @@ function renderAll(){ renderBoard(); renderPanels(); renderRoster(); renderWaive
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
+  const deal = e.target.closest("button.deal");
+  if (deal){
+    const t = (FR.deals || [])[+deal.dataset.deal];
+    if (t){
+      TRADE.partner = t.tm;
+      TRADE.give = new Set(t.g.map(p => p.k));
+      TRADE.recv = new Set(t.r.map(p => p.k));
+      renderTrade();
+      const el = $("#tradeout");
+      if (el && typeof el.scrollIntoView === "function")
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    return;
+  }
   const trow = e.target.closest("button.trow");
   if (trow){
     const set = TRADE[trow.dataset.side];
@@ -883,9 +1040,10 @@ on(document, "keydown", e=>{
   if (rowEl && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); openPlayer(rowEl.dataset.k); }
 }, "keydown");
 on($("#team"), "change", e=>{ team = e.target.value;
-  TRADE.give.clear(); TRADE.recv.clear(); renderAll(); }, "team");
+  TRADE.give.clear(); TRADE.recv.clear(); clearFound(); renderAll(); }, "team");
 on($("#tpartner"), "change", e=>{ TRADE.partner = e.target.value; TRADE.recv.clear(); renderTrade(); }, "tpartner");
-on($("#tscale"), "change", e=>{ TRADE.scale = e.target.value; renderTrade(); }, "tscale");
+on($("#tscale"), "change", e=>{ TRADE.scale = e.target.value; clearFound(); renderTrade(); }, "tscale");
+on($("#findbtn"), "click", runFinder, "findbtn");
 on($("#tclear"), "click", ()=>{ TRADE.give.clear(); TRADE.recv.clear(); renderTrade(); }, "tclear");
 on($("#hide"), "change", e=>{ hideDismissed = e.target.checked; renderAll(); }, "hide");
 on($("#q"), "input", e=>{ q = e.target.value.toLowerCase().trim(); renderTable(); }, "q");
@@ -1045,6 +1203,15 @@ def build(data, src_path):
     </tr></thead><tbody id="wbody"></tbody></table>
   </div>
   <div class="sidegrid" id="sidetables"></div>
+
+  <h2 class="sec">Recommended trades</h2>
+  <p class="secsub">Scans every rival roster for deals that improve <b>both</b> starting lineups,
+    on the board selected below. A deal only you gain from is one the other manager turns down.</p>
+  <div id="findbar">
+    <button id="findbtn" type="button">Find trades</button>
+    <span id="findnote"></span>
+  </div>
+  <div id="findout"></div>
 
   <h2 class="sec">Trade evaluator</h2>
   <p class="secsub">Pick players from each roster. Scored on the rest-of-season board by default,
