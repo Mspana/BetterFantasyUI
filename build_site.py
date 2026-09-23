@@ -61,15 +61,17 @@ def split(html):
         return hashlib.sha1(json.dumps(obj, separators=(",", ":"), sort_keys=True)
                             .encode()).hexdigest()[:10]
 
+    # No cache-busting query string: Pages serves these with a ten minute
+    # cache, well inside an hourly refresh, and leaving the shell free of any
+    # varying token keeps it byte-identical forever -- so an hourly commit
+    # carries the data that changed and nothing else.
     payload.pop("build", None)
-    stamp = digest(payload)
-    nv = digest(news)
-    payload["build"] = stamp[:6]
+    payload["build"] = digest(payload)[:6]
     loader = (
         '<script type="module">\n'
         'const [D, NEWS] = await Promise.all([\n'
-        f'  fetch("data.json?v={stamp}").then(r => r.json()),\n'
-        f'  fetch("news.json?v={nv}").then(r => r.json())\n'
+        '  fetch("data.json").then(r => r.json()),\n'
+        '  fetch("news.json").then(r => r.json())\n'
         ']);\n'
         'D.detail = NEWS;\n'
         f'{js}\n'
