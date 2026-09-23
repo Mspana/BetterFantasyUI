@@ -15,7 +15,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 SKILL = ("RB", "WR", "TE")
 
-_throttle = threading.Semaphore(3)      # be polite: at most 3 in flight
+_throttle = threading.Semaphore(2)      # be polite: at most 2 in flight
 _tag = re.compile(r"<[^>]+>")
 
 
@@ -23,7 +23,9 @@ def _text(s):
     return re.sub(r"\s+", " ", _tag.sub(" ", s)).replace("&nbsp;", " ").strip()
 
 
-def _get(url, tries=3):
+def _get(url, tries=5):
+    """Fetch with backoff. Refreshing a whole league is ~600 requests, which
+    trips FantasyPros' rate limiter, so throttling has to be patient."""
     for a in range(tries):
         try:
             with _throttle:
@@ -35,11 +37,12 @@ def _get(url, tries=3):
                 return None
             if a == tries - 1:
                 raise
-            time.sleep(1.5 * (a + 1))
+            # 429/403 mean slow down, not stop
+            time.sleep((6 if e.code in (403, 429) else 2) * (a + 1))
         except Exception:
             if a == tries - 1:
                 raise
-            time.sleep(1.5 * (a + 1))
+            time.sleep(2 * (a + 1))
     return None
 
 
@@ -114,15 +117,30 @@ def targets(data, top_fa=50):
     return [p for p in want.values() if p.get("slug")]
 
 
+# News goes stale within a day; without an expiry a cached entry would be served
+# forever and the page would quietly show last week's headlines.
+MAX_AGE = 6 * 3600
+
+
 def one(p, refresh):
     path = os.path.join(CACHE, f"{p['slug']}.json")
-    if os.path.exists(path) and not refresh:
+    fresh = (os.path.exists(path)
+             and time.time() - os.path.getmtime(path) < MAX_AGE)
+    if fresh and not refresh:
         try:
             with open(path, encoding="utf-8") as f:
                 return p["key"], json.load(f)
         except Exception:
             pass
-    rec = {"news": news(p["slug"]), "log": gamelog(p["slug"])}
+    try:
+        rec = {"news": news(p["slug"]), "log": gamelog(p["slug"])}
+    except Exception:
+        # a rate-limited refresh must not leave the player with nothing:
+        # stale news beats no news
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return p["key"], json.load(f)
+        raise
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rec, f)
     return p["key"], rec
@@ -139,7 +157,7 @@ def main():
           f"({sum(1 for p in tg if p['owner'])} rostered)...")
 
     out, done, failed = {}, 0, []
-    with cf.ThreadPoolExecutor(max_workers=6) as ex:
+    with cf.ThreadPoolExecutor(max_workers=3) as ex:
         futs = {ex.submit(one, p, refresh): p for p in tg}
         for f in cf.as_completed(futs):
             p = futs[f]

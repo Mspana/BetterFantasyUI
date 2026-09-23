@@ -38,7 +38,7 @@ def build(name, refresh=False, skip_extras=False):
 
     step(f"{name}: rankings", ["fantasy.py", "--config", cfg, "--out", data] + extra)
     if not skip_extras:
-        step(f"{name}: news + game logs", ["details.py", data])
+        step(f"{name}: news + game logs", ["details.py", data] + extra)
         step(f"{name}: headshots", ["photos.py", data])
     step(f"{name}: report", ["make_report.py", data, os.path.join(d, "report.html")])
     print(f"\n{name}: {os.path.join(d, 'report.html')}")
