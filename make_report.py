@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = ("RB", "WR", "TE")
 SIDE = ("QB", "DST", "K")      # tracked, but never mixed into the skill board
 MAX_PHOTOS = 250               # an artifact accepts at most 255 supporting files
+SITE_BASE = "https://gibdulbas.it/fantasy/"   # link previews need absolute URLs
 
 
 def on_ir(p):
@@ -1409,11 +1410,26 @@ def build(data, src_path):
       <div class="rows" id="{pid}"></div>
     </section>"""
 
+    desc = (f"Rankings, waiver wire and trade tools for {lg['name']}, "
+            "built on FantasyPros consensus and refreshed every hour.")
     ppr = "Full PPR" if lg["ppr"] >= 0.75 else ("Half PPR" if lg["ppr"] >= 0.25 else "Standard")
     fmt = "Superflex" if lg["superflex"] else "1-QB"
     starters = ", ".join(f"{v}{k}" for k, v in lg["slots"].items() if k not in ("Bench", "IR"))
 
     return f"""<title>{esc(board_title(lg['name']))}</title>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{esc(lg['name'])}">
+<meta property="og:title" content="{esc(lg['name'])} &middot; Fantasy Football">
+<meta property="og:description" content="{esc(desc)}">
+<meta property="og:url" content="{SITE_BASE}">
+<meta property="og:image" content="{SITE_BASE}og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{esc(lg['name'])} &middot; Fantasy Football">
+<meta name="twitter:description" content="{esc(desc)}">
+<meta name="twitter:image" content="{SITE_BASE}og.jpg">
+<meta name="description" content="{esc(desc)}">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">

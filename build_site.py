@@ -129,6 +129,13 @@ def main(league="brunch", out=None):
     if old != html:
         io.open(index, "w", encoding="utf-8").write(html)
 
+    card = os.path.join(HERE, "site_assets", "og.jpg")
+    if os.path.exists(card):
+        dst_card = os.path.join(out, "og.jpg")
+        if (not os.path.exists(dst_card)
+                or os.path.getsize(dst_card) != os.path.getsize(card)):
+            shutil.copy(card, dst_card)
+
     copied = 0
     for pid in data.get("photos", {}):
         dst = os.path.join(out, "img", pid + ".png")
