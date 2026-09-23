@@ -7,7 +7,7 @@ stays byte-identical and only the changed JSON lands in a commit.
 
     python build_site.py <league> <out-dir>
 """
-import io, json, os, re, shutil, sys, time
+import hashlib, io, json, os, re, shutil, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = ("RB", "WR", "TE")
@@ -54,12 +54,22 @@ def split(html):
     keep = trim_players(payload)
     news = {k: v for k, v in news.items() if k in keep}
 
-    stamp = str(int(time.time()))
+    # Cache-bust and stamp from CONTENT, never the clock. A timestamp rewrites
+    # the shell and the data every hour and defeats the point of committing
+    # only what changed.
+    def digest(obj):
+        return hashlib.sha1(json.dumps(obj, separators=(",", ":"), sort_keys=True)
+                            .encode()).hexdigest()[:10]
+
+    payload.pop("build", None)
+    stamp = digest(payload)
+    nv = digest(news)
+    payload["build"] = stamp[:6]
     loader = (
         '<script type="module">\n'
         'const [D, NEWS] = await Promise.all([\n'
         f'  fetch("data.json?v={stamp}").then(r => r.json()),\n'
-        f'  fetch("news.json?v={stamp}").then(r => r.json())\n'
+        f'  fetch("news.json?v={nv}").then(r => r.json())\n'
         ']);\n'
         'D.detail = NEWS;\n'
         f'{js}\n'
