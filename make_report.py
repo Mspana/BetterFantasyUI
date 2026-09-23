@@ -177,13 +177,24 @@ button.mkdot.flag .d{background:var(--rise);border-color:var(--rise)}
 button.mkdot.dismiss .d{background:var(--fall);border-color:var(--fall)}
 tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #markwarn{font-size:11.5px;color:var(--fall)}
-.whoisit{display:flex;align-items:center;gap:9px;cursor:pointer;font:inherit;color:var(--ink);
-  background:var(--accent-soft);border:1px solid var(--accent);border-radius:4px;
-  padding:4px 12px 4px 4px}
-.whoisit img{width:32px;height:32px;border-radius:3px;object-fit:cover;display:block;
-  background:var(--raised)}
-.whoisit span{font-family:Oswald,sans-serif;font-size:14px;letter-spacing:.04em}
-.whoisit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* The portrait sits in the top-right corner of the masthead, big, with the
+   team name under it. The header reserves room on the right so the league
+   name never runs beneath it. */
+.whoisit{display:flex;flex-direction:column;align-items:center;gap:7px;cursor:pointer;
+  font:inherit;color:var(--ink);background:none;border:0;padding:0}
+.whoisit img{width:clamp(84px,9.5vw,132px);aspect-ratio:1;border-radius:5px;
+  object-fit:cover;display:block;background:var(--raised);
+  border:1px solid var(--line);box-shadow:var(--shadow)}
+.whoisit span{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--muted);max-width:clamp(84px,9.5vw,132px);
+  text-align:center;line-height:1.35}
+.whoisit:hover span{color:var(--ink)}
+.whoisit:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:5px}
+@media (min-width:701px){
+  header.top .wrap{position:relative;padding-right:clamp(108px,11.5vw,160px)}
+  .teampick{position:absolute;top:20px;right:16px;margin:0;gap:0;flex-direction:column;
+    align-items:flex-end}
+}
 #schbtn{font-family:Oswald,sans-serif;font-size:17px;letter-spacing:.06em;
   text-transform:uppercase;cursor:pointer;border:1px solid var(--line);
   background:var(--surface);color:var(--ink);border-radius:6px;
@@ -210,7 +221,10 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 @media (max-width:700px){.pgrid{grid-template-columns:repeat(2,1fr)}}
 .ptile{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;
   font:inherit;color:inherit;text-align:center}
-.pshot{position:relative;width:100%;aspect-ratio:1;overflow:hidden;background:var(--raised)}
+/* both are spans inside a button: without display:block they stay inline,
+   width and aspect-ratio do not apply, and the whole tile collapses */
+.pshot{display:block;position:relative;width:100%;aspect-ratio:1;overflow:hidden;
+  background:var(--raised)}
 .pshot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .pshot .p2{opacity:0;transition:opacity .12s ease}
 /* hover reveals the second photo; the heading flips them all, and hovering
@@ -220,10 +234,12 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 .pgrid.flipped .ptile:hover .pshot .p2,
 .pgrid.flipped .ptile:focus-visible .pshot .p2{opacity:0}
 .ptile:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
-.pname{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
+/* NOT .pname -- that class already labels every player name in the tables,
+   and this rule comes later in the sheet, so it would restyle all of them */
+.ptname{display:block;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--muted);padding:7px 6px 12px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ptile:hover .pname{color:var(--ink)}
+.ptile:hover .ptname{color:var(--ink)}
 @media (prefers-reduced-motion:reduce){.pshot .p2{transition:none}}
 #powerwrap table{min-width:560px}
 #powerwrap tbody tr{cursor:default}
@@ -232,6 +248,9 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #powerwrap tr.you .tname{font-weight:600}
 .pr{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 .prank{font-family:Oswald,sans-serif;font-size:17px;color:var(--muted)}
+#powerwrap td.pface,#powerwrap th.pface{width:34px;padding-right:0}
+.pface img{width:26px;height:26px;border-radius:3px;object-fit:cover;display:block;
+  background:var(--raised)}
 tr.you .prank{color:var(--accent)}
 #findbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
 #findbtn{font-family:Oswald,sans-serif;font-size:14px;letter-spacing:.05em;text-transform:uppercase;
@@ -348,7 +367,10 @@ tr.mine:hover td{background:var(--accent-soft);filter:brightness(.97)}
 footer{color:var(--muted);font-size:12px;margin-top:30px;line-height:1.65;max-width:70ch}
 footer b{color:var(--ink)}
 @media (max-width:560px){.row{font-size:12.5px}header.top{padding-block:16px 0}
-  .teampick{margin-left:0;flex:1 1 100%}#team{flex:1}}
+  .teampick{margin-left:0;flex:1 1 100%;justify-content:flex-start}#team{flex:1}
+  .whoisit{flex-direction:row;gap:10px}
+  .whoisit img{width:56px}
+  .whoisit span{max-width:none;text-align:left;font-size:11.5px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
 
@@ -704,7 +726,7 @@ function renderPicker(){
         <img src="${p.img}" alt="${p.name}" loading="lazy" decoding="async">
         ${p.img2 ? `<img class="p2" src="${p.img2}" alt="" loading="lazy" decoding="async">` : ""}
       </span>
-      <span class="pname">${p.team}</span>
+      <span class="ptname">${p.team}</span>
     </button>`).join("");
 }
 
@@ -778,13 +800,17 @@ function teamTotals(){
 function renderPower(){
   const rows = teamTotals();
   const sc = scale;
+  const face = {};
+  (D.people || []).forEach(p => face[p.team] = p);
   $("#powerbody").innerHTML = rows.map((r, i) => `<tr class="${r.tm === team ? "you" : ""}">
     <td class="prank">${i + 1}</td>
+    <td class="pface">${face[r.tm]
+      ? `<img src="${face[r.tm].img}" alt="${face[r.tm].name}" loading="lazy" decoding="async">`
+      : ""}</td>
     <td class="tname">${r.tm}</td>
     <td class="pr r">${r.start.toFixed(0)}</td>
     <td class="pr r">${r.bench.toFixed(0)}</td>
     <td class="pr r">${r.total.toFixed(0)}</td>
-    <td class="pr r">${r.n}</td>
     <td>${r.best ? r.best.n + ' <span class="owner">' + (r.best.s[sc].pr || "") + "</span>" : ""}</td>
   </tr>`).join("");
   document.querySelectorAll("#powerwrap th[data-ps]").forEach(th => {
@@ -1307,6 +1333,12 @@ def build(data, src_path):
     wk = data["week"]
     my_name = data["my_team"]["name"]
 
+    people = []
+    pman = os.path.join(HERE, "people_img", "people.json")
+    if os.path.exists(pman):
+        with open(pman, encoding="utf-8") as f:
+            people = json.load(f)
+
     detail_path = os.path.join(os.path.dirname(os.path.abspath(src_path)), "details.json")
     detail = {}
     if os.path.exists(detail_path):
@@ -1326,15 +1358,18 @@ def build(data, src_path):
                 pl["scales"]["week"]["skill"] or 9999,
                 pl["scales"]["week"]["pos_num"] or 9999, pl["name"])
 
+    # an artifact takes 255 files in total, so the portraits share the budget
+    budget = MAX_PHOTOS - 2 * len(people)
     photos = {}
     for pl in sorted(ps, key=photo_prio):
         pid = str(pl.get("pid") or "")
         if pid and pid in have and pid not in photos:
             photos[pid] = 1
-            if len(photos) >= MAX_PHOTOS:
+            if len(photos) >= budget:
                 break
 
     payload = {
+        "people": people,
         "photos": photos,
         "players": [trim(p) for p in ps],
         "boards": data["boards"],
@@ -1430,11 +1465,11 @@ def build(data, src_path):
     <span id="powernote"></span></p>
   <div class="tablewrap" id="powerwrap">
     <table><thead><tr>
-      <th class="r">#</th><th>Team</th>
+      <th class="r">#</th><th class="pface"></th><th>Team</th>
       <th class="r" data-ps="start">Starters<span class="car"></span></th>
       <th class="r">Bench</th>
       <th class="r" data-ps="total">Full roster<span class="car"></span></th>
-      <th class="r">Ranked</th><th>Best player</th>
+      <th>Best player</th>
     </tr></thead><tbody id="powerbody"></tbody></table>
   </div>
 
