@@ -177,6 +177,14 @@ button.mkdot.flag .d{background:var(--rise);border-color:var(--rise)}
 button.mkdot.dismiss .d{background:var(--fall);border-color:var(--fall)}
 tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 #markwarn{font-size:11.5px;color:var(--fall)}
+#powerwrap table{min-width:560px}
+#powerwrap tbody tr{cursor:default}
+#powerwrap tbody tr:hover td{background:var(--raised)}
+#powerwrap tr.you td{background:var(--accent-soft)}
+#powerwrap tr.you .tname{font-weight:600}
+.pr{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.prank{font-family:Oswald,sans-serif;font-size:17px;color:var(--muted)}
+tr.you .prank{color:var(--accent)}
 #findbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
 #findbtn{font-family:Oswald,sans-serif;font-size:14px;letter-spacing:.05em;text-transform:uppercase;
   cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);
@@ -633,6 +641,47 @@ function showMarkWarn(){
   );
 })();
 
+/* ---- league power rankings ----
+   Two different questions: who fields the best starting lineup this week, and
+   who holds the most value overall. A team can lead one and trail the other --
+   that gap is where trades come from. */
+let powerSort = "start";
+
+function teamTotals(){
+  const sc = scale;
+  const names = [...new Set(D.players.filter(p => p.own).map(p => p.own))];
+  return names.map(tm => {
+    const roster = D.players.filter(p => p.own === tm);
+    const ranked = roster.filter(p => SKILL.includes(p.p) && p.s[sc].sk != null);
+    const start = lineupAt(roster, sc).total;
+    const total = ranked.reduce((t, p) => t + (valueAt(p, sc) || 0), 0);
+    const best = ranked.slice().sort((a, b) => a.s[sc].sk - b.s[sc].sk)[0];
+    return { tm, start, total, bench: total - start, n: ranked.length, best };
+  }).sort((a, b) => (powerSort === "start" ? b.start - a.start : b.total - a.total));
+}
+
+function renderPower(){
+  const rows = teamTotals();
+  const sc = scale;
+  $("#powerbody").innerHTML = rows.map((r, i) => `<tr class="${r.tm === team ? "you" : ""}">
+    <td class="prank">${i + 1}</td>
+    <td class="tname">${r.tm}</td>
+    <td class="pr r">${r.start.toFixed(0)}</td>
+    <td class="pr r">${r.bench.toFixed(0)}</td>
+    <td class="pr r">${r.total.toFixed(0)}</td>
+    <td class="pr r">${r.n}</td>
+    <td>${r.best ? r.best.n + ' <span class="owner">' + (r.best.s[sc].pr || "") + "</span>" : ""}</td>
+  </tr>`).join("");
+  document.querySelectorAll("#powerwrap th[data-ps]").forEach(th => {
+    th.setAttribute("aria-sort", th.dataset.ps === powerSort ? "descending" : "none");
+    th.querySelector(".car").textContent = th.dataset.ps === powerSort ? " \u25bc" : "";
+  });
+  const mine = rows.findIndex(r => r.tm === team);
+  $("#powernote").textContent = mine < 0 ? "" :
+    `${team} ranks ${mine + 1} of ${rows.length} by starting lineup` +
+    (powerSort === "start" ? "" : " (sorted by full roster)") + ".";
+}
+
 /* ---- trade evaluator ----
    Value comes from the RB/WR/TE overall board, which is real FantasyPros
    cross-position data. QB, K and D/ST have no such board, so they are shown
@@ -641,10 +690,11 @@ function showMarkWarn(){
 const TRADE = { partner: null, scale: "ros", give: new Set(), recv: new Set() };
 const TAU = 45;   // rank at which value decays to about 1/e of the top player
 
-function tval(p){
-  const r = p.s[TRADE.scale].sk;
+function valueAt(p, sc){
+  const r = p.s[sc].sk;
   return r ? 100 * Math.exp(-(r - 1) / TAU) : null;
 }
+function tval(p){ return valueAt(p, TRADE.scale); }
 
 /* A 2-for-1 frees a roster spot, and that spot is worth the best player still
    on waivers -- which in a shallow league is a real asset. A 1-for-2 costs a
@@ -688,8 +738,9 @@ function settle(roster, out, inn){
   return { roster: r, adds: [] };
 }
 
-function bestLineup(roster){
-  const sc = TRADE.scale;
+function bestLineup(roster){ return lineupAt(roster, TRADE.scale); }
+
+function lineupAt(roster, sc){
   const pool = roster.filter(p => SKILL.includes(p.p) && p.s[sc].sk != null)
                      .sort((a, b) => a.s[sc].sk - b.s[sc].sk);
   const picks = [], used = new Set();
@@ -705,7 +756,7 @@ function bestLineup(roster){
     if (flex <= 0) break;
     if (!used.has(p.k)){ picks.push(p); used.add(p.k); flex--; }
   }
-  return { total: picks.reduce((t, p) => t + (tval(p) || 0), 0), picks };
+  return { total: picks.reduce((t, p) => t + (valueAt(p, sc) || 0), 0), picks };
 }
 
 function tradeRow(p, side){
@@ -1007,10 +1058,12 @@ function closePlayer(){
   if (lastFocus) lastFocus.focus();
 }
 
-function renderAll(){ renderBoard(); renderPanels(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
+function renderAll(){ renderBoard(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
+  const ps = e.target.closest("#powerwrap th[data-ps]");
+  if (ps){ powerSort = ps.dataset.ps; renderPower(); return; }
   const deal = e.target.closest("button.deal");
   if (deal){
     const t = (FR.deals || [])[+deal.dataset.deal];
@@ -1230,6 +1283,21 @@ def build(data, src_path):
     {panel("drops", "p-drops", "Drop candidates", "below the best free agent at that spot")}
   </div>
   {panel("", "p-stash", "IR stash", "costs no active roster spot")}
+
+  <h2 class="sec">League power rankings</h2>
+  <p class="secsub">Every roster scored on the board selected at the top.
+    <b>Starters</b> is the best lineup that roster can field; <b>bench</b> is everything else.
+    A team strong on one and weak on the other is the one to trade with.
+    <span id="powernote"></span></p>
+  <div class="tablewrap" id="powerwrap">
+    <table><thead><tr>
+      <th class="r">#</th><th>Team</th>
+      <th class="r" data-ps="start">Starters<span class="car"></span></th>
+      <th class="r">Bench</th>
+      <th class="r" data-ps="total">Full roster<span class="car"></span></th>
+      <th class="r">Ranked</th><th>Best player</th>
+    </tr></thead><tbody id="powerbody"></tbody></table>
+  </div>
 
   <h2 class="sec">Roster &mdash; <span class="teamname" id="rostername"></span></h2>
   <p class="secsub">Best first. Quarterback, kicker and defense have no cross-position rank,
