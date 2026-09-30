@@ -13,6 +13,11 @@ import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEAGUES = os.path.join(HERE, "leagues")
 PY = sys.executable
+# The season model (ml/) needs pandas and scikit-learn, which live in this
+# project's own .venv. Where there is none -- the hourly site build on GitHub
+# Actions -- the board is built without the Model scale.
+VENV_PY = (os.path.join(HERE, ".venv", "Scripts", "python.exe") if os.name == "nt"
+           else os.path.join(HERE, ".venv", "bin", "python"))
 
 
 def league_dir(name):
@@ -40,6 +45,11 @@ def build(name, refresh=False, skip_extras=False):
     if not skip_extras:
         step(f"{name}: news + game logs", ["details.py", data] + extra)
         step(f"{name}: headshots", ["photos.py", data])
+    if os.path.exists(VENV_PY):
+        print(f"\n=== {name}: season model ===")
+        r = subprocess.run([VENV_PY, "-m", "ml.predict", name], cwd=HERE)
+        if r.returncode != 0:                   # the board still builds, on its last model.json
+            print(f"{name}: season model failed ({r.returncode})")
     step(f"{name}: report", ["make_report.py", data, os.path.join(d, "report.html")])
     print(f"\n{name}: {os.path.join(d, 'report.html')}")
 

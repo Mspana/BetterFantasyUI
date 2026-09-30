@@ -6,3 +6,7 @@ report.html
 __pycache__/
 _check.js
 site/
+.venv/
+ml/cache/
+ml/exam/
+logs/

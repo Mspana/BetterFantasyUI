@@ -12,7 +12,12 @@ For each league it produces one self-contained HTML page with:
   player you hold at that position.
 - **Every skill player** — all RB/WR/TE ranked against each other, sortable and
   filterable by position and owner.
-- **Three ranking boards** — this week, rest of season, and draft day.
+- **Experts | Model** — the rest of the season read two ways: the FantasyPros
+  experts, or our own season model blended with them (see below). This week and
+  draft day are there too.
+- **Model vs experts** — the players the two boards disagree on, by 20+ places,
+  split into free agents, trade targets and your own roster; every table shows
+  the other board's rank beside the one you picked.
 - **Viewing as** — switch to any team in the league to scout a trade partner.
 - **Player drawer** — click a player for their game log and recent FantasyPros news.
 - **Flag / dismiss** — click the dot next to a name to cycle green, red, clear.
@@ -22,7 +27,16 @@ FantasyPros publishes no board that ranks them against skill players.
 
 ## Requirements
 
-Python 3.10+, standard library only.
+Python 3.10+, standard library only, for the board. The season model needs
+pandas and scikit-learn in its own virtual environment:
+
+```
+python -m venv .venv
+.venv/Scripts/python -m pip install -r ml/requirements.txt
+```
+
+`run.py` uses the model when `.venv` exists and quietly builds without it when it
+doesn't (as on the hourly GitHub Actions build).
 
 ## Setup
 
@@ -104,6 +118,44 @@ Some traps worth knowing if you change that mapping:
 "Move" is the change in *positional* rank since draft day (e.g. `TE3 → TE35`),
 because it is the only measure that means the same thing across all three boards.
 
+## The season model
+
+`ml/` predicts every RB/WR/TE's rest of season from the weeks played so far:
+points per game, games he will play, total points and a stat line. It trains on
+every season since 2008 from free public data -- nflverse weekly stats, snap
+counts, injury reports and rosters, ffopportunity expected points, Vegas lines,
+and ESPN's injury page as archived by the Wayback Machine for past seasons.
+
+The **Model** board averages the model's ranking with the FantasyPros
+rest-of-season ranking. In a walk-forward backtest -- every season from 2020 to
+2025 predicted by a model trained only on the seasons before it, frozen after
+each of weeks 1-14 -- that blend out-ranked the experts at every week.
+
+```
+python -m ml.predict brunch        # this week's predictions -> leagues/brunch/model.json
+python -m ml.backtest              # the walk-forward backtest, weeks 1-14
+python -m ml.backtest --week 3     # one week, season by season
+python -m ml.exam score            # 2026, which nothing was tuned on, scored so far
+python -m ml.injury_labels pending # new injury comments for Claude to label
+```
+
+Players on IR get their games from ESPN's expected return date, corrected by
+how IR stints actually played out: Claude reads each injury comment, with names
+and teams masked, and labels whether a timeline was given
+(`ml/label_prompt.md`); the labels live in `ml/labels/`.
+
+The model is frozen (`MODEL_VERSION` in `ml/backtest.py`). Its 2020-2025 scores
+were used to make design choices, so they run a little optimistic; `ml/exam.py`
+saves the model's and the experts' ranks every week of 2026 and scores both at
+season end.
+
+## Weekly job
+
+`weekly.py` runs every league's board and model, takes the week's exam snapshot,
+and commits and pushes each league's `model.json` so the live site picks it up.
+It runs from a Windows scheduled task on Tuesday and Wednesday evenings and logs
+to `logs/weekly.log`.
+
 ## Files
 
 | File | Role |
@@ -118,3 +170,12 @@ because it is the only measure that means the same thing across all three boards
 | `details.py` | News and game log scraper |
 | `photos.py` | Headshot downloader |
 | `make_report.py` | Renders the HTML page |
+| `build_site.py` | Turns a league's page into the static site (`--hidden` for an unlisted board) |
+| `weekly.py` | The weekly job: boards, model, exam snapshot, publish `model.json` |
+| `ml/predict.py` | This week's rest-of-season predictions for a league |
+| `ml/features.py` | One row per player-season, frozen at a week |
+| `ml/data.py` | Downloads and caches the public datasets |
+| `ml/backtest.py` | Walk-forward backtest and the frozen model settings |
+| `ml/injury_news.py` | ESPN's injury page, live and archived; the IR return rule |
+| `ml/injury_labels.py` | Masked injury comments out to Claude, labels back in |
+| `ml/exam.py` | The 2026 snapshots and their score |
