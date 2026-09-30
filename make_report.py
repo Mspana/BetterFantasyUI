@@ -305,6 +305,26 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 @media (prefers-reduced-motion:reduce){.pshot .p2{transition:none}}
 #powerwrap table{min-width:560px}
 #powerwrap tbody tr{cursor:default}
+#powerwrap tbody tr.pteam{cursor:pointer}
+#powerwrap tr.pteam .tname::after{content:" \25B8";color:var(--muted);font-size:11px}
+#powerwrap tr.pteam[aria-expanded="true"] .tname::after{content:" \25BE"}
+#powerwrap tr.pteam:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+#powerwrap tr.proster>td,#powerwrap tr.proster:hover>td{background:var(--raised);padding:12px 14px 16px}
+.prgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:4px 26px}
+.prgrid h4{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);margin:8px 0 4px;font-weight:500}
+.prlist{list-style:none;margin:0;padding:0}
+.prlist li{display:flex;gap:8px;align-items:baseline;padding:4px 2px;border-bottom:1px solid var(--line);
+  cursor:pointer;font-size:13px}
+.prlist li:hover{background:var(--surface)}
+.prlist li:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.prlist li.mk-flag{background:var(--rise-soft)}
+.prlist li.mk-dismiss{background:var(--fall-soft);opacity:.62}
+.prlist .slot{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;color:var(--muted);
+  flex:0 0 40px}
+.prlist .rk{margin-left:auto;white-space:nowrap;font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:12px;color:var(--muted)}
+.proster .viewas{margin-top:12px}
 #powerwrap tbody tr:hover td{background:var(--raised)}
 #powerwrap tr.you td{background:var(--accent-soft)}
 #powerwrap tr.you .tname{font-weight:600}
@@ -794,7 +814,7 @@ function paintMark(k){
     dot.classList.remove("on", "flag", "dismiss");
     if (m) dot.classList.add("on", m);
     dot.setAttribute("aria-label", markLabel(m) + ": " + p.n);
-    const host = dot.closest("tr[data-k], .row[data-k]");
+    const host = dot.closest("tr[data-k], .row[data-k], li[data-k]");
     if (host){
       host.classList.remove("mk-flag", "mk-dismiss");
       if (m) host.classList.add("mk-" + m);
@@ -986,13 +1006,41 @@ function teamTotals(){
   }).sort((a, b) => (powerSort === "start" ? b.start - a.start : b.total - a.total));
 }
 
+let powerOpen = null;            // the team whose roster is open under its row
+
+function rosterPeek(tm){
+  const sc = scale, roster = D.players.filter(p => p.own === tm);
+  const lu = lineupAt(roster, sc), starting = new Set(lu.picks.map(p => p.k));
+  const rankOf = p => p.s[sc].sk ?? p.s[sc].pn;
+  const li = (p, slot) => {
+    const v = valueAt(p, sc);
+    return `<li class="${markClass(p).trim()}" data-k="${p.k}" role="button" tabindex="0">
+      <span class="slot">${slot}</span><span>${nameCell(p)}</span>
+      <span class="rk">${p.s[sc].pr || "unranked"}${v != null ? " &middot; " + v.toFixed(0) : ""}</span></li>`;
+  };
+  const group = (title, items) => items.length
+    ? `<div><h4>${title}</h4><ul class="prlist">${items.join("")}</ul></div>` : "";
+  const bench = roster.filter(p => SKILL.includes(p.p) && !starting.has(p.k) && !p.ir).sort(by(rankOf));
+  const ir = roster.filter(p => p.ir && !starting.has(p.k)).sort(by(rankOf));
+  const side = roster.filter(p => SIDE.includes(p.p)).sort((a, b) => SIDE.indexOf(a.p) - SIDE.indexOf(b.p));
+  return `<div class="prgrid">
+      ${group("Starting &middot; " + lu.total.toFixed(0), lu.picks.map((p, i) => li(p, lu.slots[i])))}
+      <div>${group("Bench", bench.map(p => li(p, p.p)))}${group("IR", ir.map(p => li(p, "IR")))}${
+        group("QB &middot; K &middot; D/ST", side.map(p => li(p, p.p)))}</div>
+    </div>
+    ${tm === team ? "" : `<button type="button" class="chip viewas" data-team="${attr(tm)}">View the whole page as ${esc(tm)}</button>`}`;
+}
+const attr = s => esc(s).replace(/"/g, "&quot;");
+
 function renderPower(){
   const rows = teamTotals();
   const sc = scale;
   const face = {};
   (D.people || []).forEach(p => face[p.team] = p);
   $("#powerwrap").classList.toggle("nofaces", !Object.keys(face).length);
-  $("#powerbody").innerHTML = rows.map((r, i) => `<tr class="${r.tm === team ? "you" : ""}">
+  if (powerOpen && !rows.some(r => r.tm === powerOpen)) powerOpen = null;
+  $("#powerbody").innerHTML = rows.map((r, i) => `<tr class="pteam${r.tm === team ? " you" : ""}"
+      data-team="${attr(r.tm)}" role="button" tabindex="0" aria-expanded="${r.tm === powerOpen}">
     <td class="prank">${i + 1}</td>
     <td class="pface">${face[r.tm]
       ? `<img src="${D.base}${face[r.tm].img}" alt="${face[r.tm].name}" loading="lazy" decoding="async">`
@@ -1002,7 +1050,7 @@ function renderPower(){
     <td class="pr r">${r.bench.toFixed(0)}</td>
     <td class="pr r">${r.total.toFixed(0)}</td>
     <td>${r.best ? r.best.n + ' <span class="owner">' + (r.best.s[sc].pr || "") + "</span>" : ""}</td>
-  </tr>`).join("");
+  </tr>${r.tm === powerOpen ? `<tr class="proster"><td colspan="7">${rosterPeek(r.tm)}</td></tr>` : ""}`).join("");
   document.querySelectorAll("#powerwrap th[data-ps]").forEach(th => {
     th.setAttribute("aria-sort", th.dataset.ps === powerSort ? "descending" : "none");
     th.querySelector(".car").textContent = th.dataset.ps === powerSort ? " \u25bc" : "";
@@ -1074,20 +1122,20 @@ function bestLineup(roster){ return lineupAt(roster, TRADE.scale); }
 function lineupAt(roster, sc){
   const pool = roster.filter(p => SKILL.includes(p.p) && p.s[sc].sk != null)
                      .sort((a, b) => a.s[sc].sk - b.s[sc].sk);
-  const picks = [], used = new Set();
+  const picks = [], slots = [], used = new Set();
   for (const pos of SKILL){
     let n = +(D.slots[pos] || 0);
     for (const p of pool){
       if (n <= 0) break;
-      if (p.p === pos && !used.has(p.k)){ picks.push(p); used.add(p.k); n--; }
+      if (p.p === pos && !used.has(p.k)){ picks.push(p); slots.push(pos); used.add(p.k); n--; }
     }
   }
   let flex = +(D.slots.FLEX || 0);
   for (const p of pool){
     if (flex <= 0) break;
-    if (!used.has(p.k)){ picks.push(p); used.add(p.k); flex--; }
+    if (!used.has(p.k)){ picks.push(p); slots.push("FLEX"); used.add(p.k); flex--; }
   }
-  return { total: picks.reduce((t, p) => t + (valueAt(p, sc) || 0), 0), picks };
+  return { total: picks.reduce((t, p) => t + (valueAt(p, sc) || 0), 0), picks, slots };
 }
 
 function tradeRow(p, side){
@@ -1458,6 +1506,15 @@ on(document, "click", e=>{
     return;
   }
   if (e.target.closest("#whoami")){ $("#pgrid").classList.toggle("flipped"); return; }
+  const va = e.target.closest("button.viewas");
+  if (va){
+    team = va.dataset.team;
+    $("#team").value = team;
+    TRADE.give.clear(); TRADE.recv.clear(); clearFound(); renderAll();
+    return;
+  }
+  const pt = e.target.closest("#powerwrap tr.pteam");
+  if (pt){ powerOpen = powerOpen === pt.dataset.team ? null : pt.dataset.team; renderPower(); return; }
   const ps = e.target.closest("#powerwrap th[data-ps]");
   if (ps){ powerSort = ps.dataset.ps; renderPower(); return; }
   const deal = e.target.closest("button.deal");
@@ -1499,7 +1556,7 @@ on(document, "click", e=>{
     return;
   }
   // scoped to rows: sortable <th> also carry data-k and must not open the drawer
-  const rowEl = e.target.closest("tr[data-k], .row[data-k]");
+  const rowEl = e.target.closest("tr[data-k], .row[data-k], li[data-k]");
   if (rowEl && !e.target.closest("a")){ openPlayer(rowEl.dataset.k); return; }
   const s = e.target.closest(".scalebtn");
   if (s){
@@ -1537,8 +1594,16 @@ on(document, "keydown", e=>{
     cycleMark(dot.dataset.mark);
     return;
   }
-  const rowEl = e.target.closest && e.target.closest(".row[data-k]");
-  if (rowEl && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); openPlayer(rowEl.dataset.k); }
+  const rowEl = e.target.closest && e.target.closest(".row[data-k], li[data-k]");
+  if (rowEl && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); openPlayer(rowEl.dataset.k); return; }
+  const pt = e.target.closest && e.target.closest("#powerwrap tr.pteam");
+  if (pt && (e.key === "Enter" || e.key === " ")){
+    e.preventDefault();
+    powerOpen = powerOpen === pt.dataset.team ? null : pt.dataset.team;
+    renderPower();
+    const again = [...document.querySelectorAll("#powerwrap tr.pteam")].find(r => r.dataset.team === pt.dataset.team);
+    if (again) again.focus();
+  }
 }, "keydown");
 on($("#team"), "change", e=>{ team = e.target.value;
   TRADE.give.clear(); TRADE.recv.clear(); clearFound(); renderAll(); }, "team");
@@ -1812,7 +1877,7 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
   </div>
 
   <h2 class="sec">League power rankings</h2>
-  <p class="secsub">Every roster scored on the board selected at the top.
+  <p class="secsub">Every roster scored on the board selected at the top. Click a team to see its roster.
     <b>Starters</b> is the best lineup that roster can field; <b>bench</b> is everything else.
     A team strong on one and weak on the other is the one to trade with.
     <span id="powernote"></span></p>
