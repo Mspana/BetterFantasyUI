@@ -489,10 +489,21 @@ try {
   if (s0 && D.boards[s0] !== undefined || (s0 === "model" && D.model)) scale = s0;
 } catch(e){}
 document.querySelectorAll(".scalebtn").forEach(x => x.setAttribute("aria-pressed", x.dataset.scale === scale));
+// The chosen team is saved as its ESPN id, which survives a rename; a save
+// from before holds the name, and is read (and re-saved) that way once.
+const teamById = id => (D.teams || []).find(t => String(t.id) === String(id));
+const idOfTeam = name => { const t = (D.teams || []).find(x => x.name === name); return t ? String(t.id) : name; };
+let teamSaved = false;
 try {
   const saved = localStorage.getItem(LS("fr_team"));
-  if (saved && D.players.some(p => p.own === saved)) team = saved;
+  const name = teamById(saved) ? teamById(saved).name : saved;
+  if (name && D.players.some(p => p.own === name)){
+    team = name; teamSaved = true;
+    if (!teamById(saved)) localStorage.setItem(LS("fr_team"), idOfTeam(name));
+  }
 } catch(e){}
+// the dropdown is built on the server with the league's own team selected
+if (document.getElementById("team")) document.getElementById("team").value = team;
 let sortKey = "sk", sortDir = 1;
 
 const sk = (p) => p.s[scale].sk;
@@ -875,7 +886,8 @@ function showPicker(){
 
 function choose(t){
   team = t;
-  try { localStorage.setItem(LS("fr_team"), t); } catch(e){}
+  try { localStorage.setItem(LS("fr_team"), idOfTeam(t)); } catch(e){}
+  teamSaved = true;
   const el = $("#picker");
   if (el) el.hidden = true;
   const sel = $("#team");
@@ -1555,7 +1567,7 @@ try {
   toggleSchmove(localStorage.getItem(LS("fr_schmove")) === "1");
 } catch(e){ toggleSchmove(false); }
 try {
-  if (!localStorage.getItem(LS("fr_team"))) showPicker();
+  if (!teamSaved) showPicker();
 } catch(e){ showPicker(); }
 """
 
@@ -1592,10 +1604,13 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
             people = json.load(f)
     # Only the people actually in THIS league: the roster map is global, and a
     # chooser full of another league's teams picks nothing.
-    league_teams = {p["owner"] for p in ps if p["owner"]}
-    people = [dict(r, img="people_img/" + os.path.basename(r["img"]),
+    # A person is tied to a league and an ESPN team id, which a team keeps when
+    # its manager renames it; the name shown is whatever ESPN calls it today.
+    names = {t["id"]: t["name"] for t in data["teams"]}
+    people = [dict(r, team=names[r["team_id"]],
+                   img="people_img/" + os.path.basename(r["img"]),
                    img2=("people_img/" + os.path.basename(r["img2"])) if r.get("img2") else None)
-              for r in people if r["team"] in league_teams]
+              for r in people if r.get("league") == league_key and r.get("team_id") in names]
 
     # The banner card is per league; without one the page simply has no banner.
     card = f"site_assets/{league_key}-og.jpg"
@@ -1658,6 +1673,7 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
                  if model else None,
         "boards": data["boards"],
         "myTeam": my_name,
+        "teams": data["teams"],
         "size": size,
         "week": wk,
         "slots": lg["slots"],

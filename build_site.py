@@ -38,12 +38,6 @@ def trim_players(payload):
     return keep
 
 
-def load_people():
-    """The prepared portraits' manifest, every league's."""
-    man = os.path.join(HERE, "people_img", "people.json")
-    return json.load(io.open(man, encoding="utf-8")) if os.path.exists(man) else []
-
-
 def copy_people(out, people):
     """Copy only the portraits this league's page shows."""
     if not people:
@@ -62,7 +56,7 @@ def copy_people(out, people):
                 shutil.copy(os.path.join(src, f), target)
 
 
-def split(html, people=None):
+def split(html):
     """Pull the embedded payload out and rewrite the page to fetch it."""
     m = re.search(r"<script>window\.__DATA__ = (\{.*?\});</script>\s*<script>(.*?)</script>\s*$",
                   html, re.S)
@@ -79,10 +73,7 @@ def split(html, people=None):
     # The site copies assets next to the page, so no climb back up is needed
     # and the portraits are served from people/, not people_img/.
     payload["base"] = ""
-    if people:
-        # the portraits are shared across leagues; the picker shows this league's teams only
-        teams = {p["own"] for p in payload["players"] if p.get("own")}
-        payload["people"] = [r for r in people if r["team"] in teams]
+    # make_report already picked this league's people and their teams' current names
     payload["people"] = [dict(r, img="people/" + os.path.basename(r["img"]),
                               img2=("people/" + os.path.basename(r["img2"]))
                                    if r.get("img2") else None)
@@ -141,7 +132,7 @@ def main(league="brunch", out=None, hidden=False):
     out = out or os.path.join(HERE, "site")
     os.makedirs(os.path.join(out, "img"), exist_ok=True)
 
-    html, data, news = split(io.open(src, encoding="utf-8").read(), load_people())
+    html, data, news = split(io.open(src, encoding="utf-8").read())
     copy_people(out, data["people"])
     people = data["people"]
     html = html.replace(f'src="../../site_assets/{league}-og.jpg"', 'src="og.jpg"')
