@@ -33,6 +33,29 @@ def trim(p):
     }
 
 
+def add_model(players, raw, model):
+    """Give every player the "model" scale from ml/predict.py's model.json.
+
+    Skill players get the blend rank -- the season model averaged with the
+    FantasyPros rest-of-season rank -- plus their projection. QB, K and D/ST,
+    which the model does not cover, carry their FantasyPros rest-of-season rank
+    so every section of the page still works on this scale."""
+    mp = model["players"]
+    for tp, p in zip(players, raw):
+        if p["pos"] not in SKILL:
+            tp["s"]["model"] = dict(tp["s"]["ros"])
+            tp["m"]["model"] = tp["m"]["ros"]
+            continue
+        m = mp.get(p["key"])
+        tp["s"]["model"] = {"sk": m["sk"] if m else None, "pr": m["pr"] if m else None,
+                            "pn": m["pn"] if m else None, "lo": None, "hi": None}
+        dn = tp["s"]["draft"]["pn"]
+        tp["m"]["model"] = dn - m["pn"] if m and dn is not None else None
+        if m and "ppg" in m:
+            tp["x"] = {k: m[k] for k in ("msk", "ppg", "g", "pts", "line", "back", "pb", "inj")
+                       if k in m}
+
+
 CSS = """
 :root{
   --paper:#eef0f4; --surface:#fff; --raised:#f7f8fa;
@@ -59,6 +82,10 @@ CSS = """
   --shadow:0 1px 2px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box}
+/* The artifact platform ships this reset; a standalone page does not, and
+   without it any class that sets display (.whoisit is display:flex) beats the
+   UA rule for [hidden] and the element stays on screen. */
+[hidden]{display:none!important}
 /* Every wide table scrolls inside its own container, so the page itself never
    needs to scroll sideways; clamp it so nothing can widen the layout viewport
    under a phone. */
@@ -284,6 +311,7 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
 .pr{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 .prank{font-family:Oswald,sans-serif;font-size:17px;color:var(--muted)}
 #powerwrap td.pface,#powerwrap th.pface{width:34px;padding-right:0}
+#powerwrap.nofaces .pface{display:none}
 .pface img{width:26px;height:26px;border-radius:3px;object-fit:cover;display:block;
   background:var(--raised)}
 tr.you .prank{color:var(--accent)}
@@ -379,7 +407,23 @@ tr.mine:hover td{background:var(--accent-soft);filter:brightness(.97)}
 .dsec{padding:14px 18px;border-bottom:1px solid var(--line)}
 .dsec h3{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
   font-family:"IBM Plex Mono",monospace;margin-bottom:9px}
-.scalegrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.scalegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:9px}
+.projgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:10px}
+.dmeta.proj{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;color:var(--ink);line-height:1.6}
+.scalegroup{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sglabel{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted)}
+.nocmp .cmpcol{display:none}
+/* rows where the Model and the experts part by 20+ places: green = the Model ranks him higher */
+tr.mvup>td:first-child{box-shadow:inset 4px 0 0 var(--rise)}
+tr.mvdown>td:first-child{box-shadow:inset 4px 0 0 var(--fall)}
+/* smaller leans, 5-19 places: the same colors, paler */
+tr.mvlean-up>td:first-child{box-shadow:inset 4px 0 0 color-mix(in srgb,var(--rise) 35%,transparent)}
+tr.mvlean-down>td:first-child{box-shadow:inset 4px 0 0 color-mix(in srgb,var(--fall) 35%,transparent)}
+.lean-up{color:var(--rise);background:color-mix(in srgb,var(--rise-soft) 45%,transparent)}
+.lean-down{color:var(--fall);background:color-mix(in srgb,var(--fall-soft) 45%,transparent)}
+.likes{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+  color:var(--rise);background:var(--rise-soft);border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:1px}
 .scalecard{background:var(--raised);border:1px solid var(--line);border-radius:5px;padding:9px 11px}
 .scalecard .lbl{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
   font-family:"IBM Plex Mono",monospace}
@@ -426,11 +470,27 @@ function on(target, type, fn, key){
   target.addEventListener(type, fn);
 }
 const SKILL = ["RB","WR","TE"], SIDE = ["QB","DST","K"];
+const BOARD_NAME = { ros: "rest-of-season", week: "weekly", draft: "draft-day", model: "model" };
+// Several leagues' boards can share one site, and so one browser storage; each
+// keeps its own marks, team and board choice under its own keys.
+const LS = k => D.ns ? k + ":" + D.ns : k;
+// How far the Model moves a player from the experts' rest-of-season rank (+ = higher).
+// Only the experts' top 200, the range the backtest measured.
+const MOVE = 20;
+const mvOf = p => {
+  const e = p.s.ros.sk, m = p.s.model ? p.s.model.sk : null;
+  return e != null && m != null && e <= 200 ? e - m : null;
+};
 const STARTABLE = {QB:12, RB:24, WR:24, TE:12, DST:12, K:12};
 
-let scale = "week", team = D.myTeam, pos = "ALL", owner = "ALL", q = "", hideDismissed = false;
+let scale = D.model ? "ros" : "week", team = D.myTeam, pos = "ALL", owner = "ALL", q = "", hideDismissed = false;
 try {
-  const saved = localStorage.getItem("fr_team");
+  const s0 = localStorage.getItem(LS("fr_scale"));
+  if (s0 && D.boards[s0] !== undefined || (s0 === "model" && D.model)) scale = s0;
+} catch(e){}
+document.querySelectorAll(".scalebtn").forEach(x => x.setAttribute("aria-pressed", x.dataset.scale === scale));
+try {
+  const saved = localStorage.getItem(LS("fr_team"));
   if (saved && D.players.some(p => p.own === saved)) team = saved;
 } catch(e){}
 let sortKey = "sk", sortDir = 1;
@@ -457,9 +517,35 @@ const dcell = d => (d === null || d === undefined)
   ? '<span class="delta flat">--</span>'
   : `<span class="delta ${d>0?'up':d<0?'down':'flat'}">${d>0?'+':''}${d}</span>`;
 const faceFor = p => p.pid && D.photos[p.pid]
-  ? `<img class="face" src="img/${p.pid}.png" alt="" loading="lazy" width="26" height="26">`
+  ? `<img class="face" src="${D.base}img/${p.pid}.png" alt="" loading="lazy" width="26" height="26">`
   : "";
-const nameCell = p => `${faceFor(p)}${p.n}${p.inj?` <span class="inj">${p.inj}</span>`:''}${markDot(p)}`;
+const likesTag = p => (mvOf(p) ?? 0) >= MOVE
+  ? '<span class="likes" title="The Model ranks him 20+ places above the experts">model likes</span>' : "";
+const LEAN = 5;                  // below this the two boards agree
+const mvLevel = m => m == null ? "" : m >= MOVE ? "up" : m <= -MOVE ? "down"
+                   : m >= LEAN ? "lean-up" : m <= -LEAN ? "lean-down" : "";
+const cmpOn = () => !!D.model && (scale === "ros" || scale === "model");
+const mvClass = p => {
+  const lv = cmpOn() ? mvLevel(mvOf(p)) : "";
+  return lv ? " mv" + lv : "";
+};
+// the other board's rank, and how far the two disagree
+function cmpCell(p){
+  const other = scale === "model" ? p.s.ros.sk : (p.s.model ? p.s.model.sk : null);
+  if (other == null) return "--";
+  const m = mvOf(p), lv = mvLevel(m);
+  if (!lv) return "#" + other;
+  return `#${other} <span class="delta ${lv}">${m > 0 ? "+" : ""}${m}</span>`;
+}
+const nameCell = p => `${faceFor(p)}${p.n}${p.inj?` <span class="inj">${p.inj}</span>`:''}${likesTag(p)}${markDot(p)}`;
+// when a player on IR comes back: ESPN's date, pushed back by how past IR stints went
+const irNote = p => {
+  const x = p.x;
+  if (!x || !("back" in x)) return null;
+  if (x.back == null) return "out for the season";
+  return x.pb != null ? `back ~week ${x.back} &middot; ${Math.round(x.pb * 100)}% he returns`
+                      : `ESPN: back week ${x.back}`;
+};
 const ownerCell = p => p.own
   ? `<span class="owner">${p.own}</span>` : '<span class="fa">free agent</span>';
 
@@ -488,15 +574,16 @@ function renderRoster(){
     if (y!=null) return 1;
     return a.p.localeCompare(b.p) || ((pn(a)??9999) - (pn(b)??9999));
   });
-  $("#rbody").innerHTML = r.map(p=>`<tr class="mine${markClass(p)}" data-k="${p.k}">
+  $("#rbody").innerHTML = r.map(p=>`<tr class="mine${markClass(p)}${mvClass(p)}" data-k="${p.k}">
     <td class="num r">${sk(p) ?? '--'}</td>
     <td class="pname">${nameCell(p)}</td>
     <td class="num">${p.p}</td><td class="num">${p.t}</td><td class="num">${p.o||''}</td>
     <td class="num r">${p.s[scale].pr || 'unranked'}</td>
+    <td class="num r cmpcol">${cmpCell(p)}</td>
     <td class="num r">${p.s.draft.pr || '--'}</td>
     <td class="r">${dcell(mv(p))}</td>
     <td class="num">${p.sl||''}</td>
-  </tr>`).join("") || `<tr><td colspan="9" class="empty">No players.</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="10" class="empty">No players.</td></tr>`;
   $("#rostername").textContent = team;
 }
 
@@ -510,16 +597,17 @@ function renderWaiver(){
   $("#wbody").innerHTML = skillFa.map(p=>{
     const w = worst[p.p];
     const up = w && sk(p) != null && sk(w) != null && sk(p) < sk(w);
-    return `<tr class="${markClass(p).trim()}" data-k="${p.k}">
+    return `<tr class="${(markClass(p) + mvClass(p)).trim()}" data-k="${p.k}">
       <td class="num r ${up?'up-yes':''}">${sk(p) ?? '--'}</td>
       <td class="pname">${nameCell(p)}</td>
       <td class="num">${p.p}</td><td class="num">${p.t}</td><td class="num">${p.o||''}</td>
       <td class="num r">${p.s[scale].pr||'--'}</td>
+      <td class="num r cmpcol">${cmpCell(p)}</td>
       <td class="r">${dcell(mv(p))}</td>
       <td>${w ? w.n+' <span class="owner">('+(w.s[scale].pr||'unranked')+')</span>' : '--'}</td>
       <td class="num r">${w && sk(w) != null ? sk(w) : '--'}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="9" class="empty">No ranked free agents.</td></tr>`;
+  }).join("") || `<tr><td colspan="10" class="empty">No ranked free agents.</td></tr>`;
 
   $("#sidetables").innerHTML = SIDE.map(position=>{
     const w = worst[position];
@@ -576,7 +664,7 @@ function renderPanels(){
       drops.push([p, `${b.n} (${b.s[scale].pr})`]);
   });
 
-  const stash = mine.filter(p=>p.ir);
+  const stash = mine.filter(p=>p.ir).map(p => [p, irNote(p)]);
 
   const put = (sel, items, empty) => {
     const el = $(sel);
@@ -598,6 +686,7 @@ function val(p, k){
   if (k === "pn") return pn(p);
   if (k === "dn") return p.s.draft.pn;
   if (k === "m")  return mv(p);
+  if (k === "g")  return mvOf(p) == null ? null : -mvOf(p);    // ascending = the Model's biggest risers first
   if (k === "lo") return p.s[scale].lo;
   return p[k];
 }
@@ -623,11 +712,12 @@ function renderTable(){
     return c ? sortDir * c : (a.p.localeCompare(b.p) || a.n.localeCompare(b.n));
   });
   const total = D.players.filter(p=>SKILL.includes(p.p)).length;
-  $("#tbody").innerHTML = r.map(p=>`<tr class="${p.own===team?'mine':''}${markClass(p)}" data-k="${p.k}">
+  $("#tbody").innerHTML = r.map(p=>`<tr class="${p.own===team?'mine':''}${markClass(p)}${mvClass(p)}" data-k="${p.k}">
     <td class="num r">${sk(p) ?? '--'}</td>
     <td class="pname">${nameCell(p)}</td>
     <td class="num">${p.p}</td><td class="num">${p.t}</td><td class="num">${p.o||''}</td>
     <td class="num r">${p.s[scale].pr || 'unranked'}</td>
+    <td class="num r cmpcol">${cmpCell(p)}</td>
     <td class="num r">${p.s.draft.pr || '--'}</td>
     <td class="r">${dcell(mv(p))}</td>
     <td class="num r">${p.s[scale].lo && p.s[scale].hi ? p.s[scale].lo+'-'+p.s[scale].hi : ''}</td>
@@ -636,6 +726,16 @@ function renderTable(){
 }
 
 function renderBoard(){
+  document.body.classList.toggle("nocmp", !cmpOn());
+  document.querySelectorAll(".cmplbl").forEach(el => el.textContent = scale === "model" ? "Experts" : "Model");
+  if (scale === "model"){
+    const M = D.model;
+    $("#boardnote").innerHTML =
+      `Model board: season model ${M.version}, frozen after week ${M.cutoff}, averaged with the FantasyPros`
+      + ` rest-of-season board (updated ${M.experts_updated}) &middot; QB, K and D/ST are FantasyPros'`
+      + ` &middot; build ${D.build}`;
+    return;
+  }
   const b = D.boards[scale];
   $("#boardnote").innerHTML =
     `Skill board: <b>${b.slug}.php</b> &middot; ${b.board} &middot; updated ${b.updated} &middot; ${b.experts} expert${b.experts===1?'':'s'}`
@@ -653,11 +753,11 @@ const touched = new Set();       // ids changed this session; the db must not cl
 let marksDoc = null, writeChain = Promise.resolve(), pendingWrites = 0, markWarn = "";
 
 function loadLocal(){
-  try { return JSON.parse(localStorage.getItem("fr_marks") || "{}") || {}; }
+  try { return JSON.parse(localStorage.getItem(LS("fr_marks")) || "{}") || {}; }
   catch(e){ return {}; }
 }
 function saveLocal(){
-  try { localStorage.setItem("fr_marks", JSON.stringify(marks)); } catch(e){}
+  try { localStorage.setItem(LS("fr_marks"), JSON.stringify(marks)); } catch(e){}
 }
 marks = loadLocal();
 
@@ -758,8 +858,8 @@ function renderPicker(){
   if (!grid || !(D.people || []).length) return;
   grid.innerHTML = D.people.map(p => `<button type="button" class="ptile" data-team="${p.team}">
       <span class="pshot">
-        <img src="${p.img}" alt="${p.name}" loading="lazy" decoding="async">
-        ${p.img2 ? `<img class="p2" src="${p.img2}" alt="" loading="lazy" decoding="async">` : ""}
+        <img src="${D.base}${p.img}" alt="${p.name}" loading="lazy" decoding="async">
+        ${p.img2 ? `<img class="p2" src="${D.base}${p.img2}" alt="" loading="lazy" decoding="async">` : ""}
       </span>
       <span class="ptname">${p.team}</span>
     </button>`).join("");
@@ -775,7 +875,7 @@ function showPicker(){
 
 function choose(t){
   team = t;
-  try { localStorage.setItem("fr_team", t); } catch(e){}
+  try { localStorage.setItem(LS("fr_team"), t); } catch(e){}
   const el = $("#picker");
   if (el) el.hidden = true;
   const sel = $("#team");
@@ -796,7 +896,7 @@ function renderWho(){
     if (lab) lab.hidden = false;
     return;
   }
-  $("#whoimg").src = me.img;
+  $("#whoimg").src = D.base + me.img;
   $("#whoimg").alt = me.name;
   $("#whotxt").textContent = me.team;
   btn.hidden = false;
@@ -810,7 +910,7 @@ function toggleSchmove(force){
   const open = force === undefined ? box.hidden : force;
   box.hidden = !open;
   btn.setAttribute("aria-expanded", String(open));
-  try { localStorage.setItem("fr_schmove", open ? "1" : "0"); } catch(e){}
+  try { localStorage.setItem(LS("fr_schmove"), open ? "1" : "0"); } catch(e){}
 }
 
 /* Touch picking: press shows the other photo, release selects. A tap also
@@ -879,10 +979,11 @@ function renderPower(){
   const sc = scale;
   const face = {};
   (D.people || []).forEach(p => face[p.team] = p);
+  $("#powerwrap").classList.toggle("nofaces", !Object.keys(face).length);
   $("#powerbody").innerHTML = rows.map((r, i) => `<tr class="${r.tm === team ? "you" : ""}">
     <td class="prank">${i + 1}</td>
     <td class="pface">${face[r.tm]
-      ? `<img src="${face[r.tm].img}" alt="${face[r.tm].name}" loading="lazy" decoding="async">`
+      ? `<img src="${D.base}${face[r.tm].img}" alt="${face[r.tm].name}" loading="lazy" decoding="async">`
       : ""}</td>
     <td class="tname">${r.tm}</td>
     <td class="pr r">${r.start.toFixed(0)}</td>
@@ -1046,7 +1147,7 @@ function renderTrade(){
                : "About neutral for them, so it may come down to preference.";
   const unvalued = give.concat(recv).filter(p => tval(p) === null);
   const half = Math.round(TAU * Math.LN2);
-  const boardName = sc === "ros" ? "rest-of-season" : sc === "week" ? "weekly" : "draft-day";
+  const boardName = BOARD_NAME[sc];
   const slotText = SKILL.map(x => (D.slots[x] || 0) + x).join(", ") +
                    (D.slots.FLEX ? ", " + D.slots.FLEX + " FLEX" : "");
 
@@ -1185,7 +1286,7 @@ function runFinder(){
     renderFound(list);
     $("#findnote").textContent =
       `${list.length} mutually useful deal${list.length === 1 ? "" : "s"} on the ` +
-      (TRADE.scale === "ros" ? "rest-of-season" : TRADE.scale === "week" ? "weekly" : "draft-day") +
+      BOARD_NAME[TRADE.scale] +
       ` board (${Math.round(performance.now() - t0)} ms). Click one to load it above.`;
     btn.disabled = false;
   }, 30);
@@ -1204,6 +1305,36 @@ function scaleCard(p, key, label){
     <div class="lbl">${label}</div>
     <div class="big">${s.sk != null ? '#'+s.sk : (s.pr || '--')}</div>
     <div class="sm">${s.sk != null ? (s.pr || '') : ''}${s.lo && s.hi ? ' &middot; '+s.lo+'-'+s.hi : ''}</div>
+  </div>`;
+}
+
+function leanNote(p){
+  const m = mvOf(p), lv = mvLevel(m);
+  if (!lv) return "";
+  if (lv === "up") return likesTag(p);
+  if (lv === "down") return ' <span class="delta down">likes less</span>';
+  return ` <span class="delta ${lv}">leans ${m > 0 ? "higher" : "lower"}</span>`;
+}
+
+function projSection(p){
+  const x = p.x;
+  if (!x) return "";
+  const L = x.line, n = v => Math.round(v), td = v => (+v).toFixed(1);
+  const rec = `${n(L.rec)} catches on ${n(L.tgt)} targets, ${n(L.ryd)} yds, ${td(L.rtd)} TD`;
+  const rush = `${n(L.car)} carries, ${n(L.uyd)} yds, ${td(L.utd)} TD`;
+  const line = p.p === "RB" ? rush + "<br>" + rec : rec + (L.car >= 5 ? "<br>" + rush : "");
+  const ir = irNote(p), erk = p.s.ros.sk;
+  return `<div class="dsec">
+    <h3>Season model &middot; rest of season</h3>
+    <div class="projgrid">
+      <div class="scalecard"><div class="lbl">Points</div><div class="big">${x.pts}</div></div>
+      <div class="scalecard"><div class="lbl">Per game</div><div class="big">${x.ppg}</div></div>
+      <div class="scalecard"><div class="lbl">Games</div><div class="big">${x.g}</div></div>
+    </div>
+    <p class="dmeta proj">${line}</p>
+    ${ir ? `<p class="dmeta">${ir}</p>` : ""}
+    <p class="dmeta">Model <b>#${p.s.model.sk}</b>${erk != null ? `, experts <b>#${erk}</b>` : ""}${
+      leanNote(p)} &middot; the model on its own: #${x.msk}.</p>
   </div>`;
 }
 
@@ -1234,7 +1365,7 @@ function openPlayer(k){
   $("#drawer").innerHTML = `
     <div class="dhead">
       <div class="who">
-      ${p.pid && D.photos[p.pid] ? `<img class="face big" src="img/${p.pid}.png" alt="" width="56" height="56">` : ""}
+      ${p.pid && D.photos[p.pid] ? `<img class="face big" src="${D.base}img/${p.pid}.png" alt="" width="56" height="56">` : ""}
       <div>
         <h2>${esc(p.n)}</h2>
         <div class="dmeta">${esc(p.p)} &middot; ${esc(p.t||"FA")}${p.o?" &middot; "+esc(p.o):""}${
@@ -1248,11 +1379,13 @@ function openPlayer(k){
     <div class="dsec">
       <h3>Consensus rank</h3>
       <div class="scalegrid">
-        ${scaleCard(p,"draft","Draft day")}${scaleCard(p,"week","Week "+D.week)}${scaleCard(p,"ros","Rest of season")}
+        ${scaleCard(p,"draft","Draft day")}${scaleCard(p,"week","Week "+D.week)}${scaleCard(p,"ros","Rest of season")}${
+          D.model ? scaleCard(p,"model","Model") : ""}
       </div>
       <p class="dmeta" style="margin-top:9px">Move since draft day: ${
         p.m[scale]==null ? "--" : (p.m[scale]>0?"+":"")+p.m[scale]+" places at "+esc(p.p)}</p>
     </div>
+    ${projSection(p)}
     <div class="dsec">
       <h3>Mark</h3>
       <div class="drawermk mkbtns">
@@ -1276,7 +1409,29 @@ function closePlayer(){
   if (lastFocus) lastFocus.focus();
 }
 
-function renderAll(){ renderBoard(); renderWho(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
+function renderCompare(){
+  if (!D.model || !$("#cmp-fa")) return;
+  const ranked = D.players.filter(p => SKILL.includes(p.p) && mvOf(p) != null
+                                   && !(hideDismissed && markOf(p) === "dismiss"));
+  const up = ranked.filter(p => mvOf(p) >= MOVE).sort((a, b) => mvOf(b) - mvOf(a));
+  const row = p => `<div class="row${markClass(p)}" data-k="${p.k}" role="button" tabindex="0">
+    ${faceFor(p)}<span class="dname">${p.n}</span>
+    <span class="tag">${p.p} ${p.t}</span>${p.inj ? `<span class="inj">${p.inj}</span>` : ""}
+    ${dcell(mvOf(p))}
+    <span class="move">Experts #${p.s.ros.sk} <span class="a">&rarr; Model #${p.s.model.sk}</span>${
+      p.own && p.own !== team ? " &middot; " + p.own : ""}</span>
+  </div>`;
+  const put = (sel, list, empty) => {
+    $(sel).innerHTML = list.length ? list.slice(0, 6).map(row).join("") : `<div class="empty">${empty}</div>`;
+  };
+  put("#cmp-fa", up.filter(p => !p.own), "No free agent the Model ranks 20+ places above the experts.");
+  put("#cmp-other", up.filter(p => p.own && p.own !== team), "Nobody on another roster.");
+  put("#cmp-mine", up.filter(p => p.own === team), "Nobody on this roster.");
+  put("#cmp-down", ranked.filter(p => p.own === team && mvOf(p) <= -MOVE)
+                         .sort((a, b) => mvOf(a) - mvOf(b)), "Nobody on this roster.");
+}
+
+function renderAll(){ renderBoard(); renderCompare(); renderWho(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
@@ -1337,6 +1492,7 @@ on(document, "click", e=>{
   const s = e.target.closest(".scalebtn");
   if (s){
     scale = s.dataset.scale;
+    try { localStorage.setItem(LS("fr_scale"), scale); } catch(e){}
     document.querySelectorAll(".scalebtn").forEach(x=>x.setAttribute("aria-pressed", x===s));
     renderAll(); return;
   }
@@ -1396,10 +1552,10 @@ document.querySelectorAll("th[data-k]").forEach(x=>{
 });
 renderAll();
 try {
-  toggleSchmove(localStorage.getItem("fr_schmove") === "1");
+  toggleSchmove(localStorage.getItem(LS("fr_schmove")) === "1");
 } catch(e){ toggleSchmove(false); }
 try {
-  if (!localStorage.getItem("fr_team")) showPicker();
+  if (!localStorage.getItem(LS("fr_team"))) showPicker();
 } catch(e){ showPicker(); }
 """
 
@@ -1415,17 +1571,44 @@ def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def build(data, src_path):
+def build(data, src_path, dst_path, league_key, asset_base=None):
     lg, ps = data["league"], data["players"]
     size = lg.get("size") or 8
     wk = data["week"]
     my_name = data["my_team"]["name"]
+
+    # Assets live at the project root, but a league report sits two folders
+    # down, so every src needs a prefix back up. The site build overrides this
+    # to "" because it copies the assets alongside the page.
+    base = asset_base if asset_base is not None else (
+        os.path.relpath(HERE, os.path.dirname(os.path.abspath(dst_path))).replace(os.sep, "/") + "/")
+    if base == "./":
+        base = ""
 
     people = []
     pman = os.path.join(HERE, "people_img", "people.json")
     if os.path.exists(pman):
         with open(pman, encoding="utf-8") as f:
             people = json.load(f)
+    # Only the people actually in THIS league: the roster map is global, and a
+    # chooser full of another league's teams picks nothing.
+    league_teams = {p["owner"] for p in ps if p["owner"]}
+    people = [dict(r, img="people_img/" + os.path.basename(r["img"]),
+                   img2=("people_img/" + os.path.basename(r["img2"])) if r.get("img2") else None)
+              for r in people if r["team"] in league_teams]
+
+    # The banner card is per league; without one the page simply has no banner.
+    card = f"site_assets/{league_key}-og.jpg"
+    has_card = os.path.exists(os.path.join(HERE, card))
+
+    # the season model's board (ml/predict.py), where this league has one
+    model = None
+    model_path = os.path.join(os.path.dirname(os.path.abspath(src_path)), "model.json")
+    if os.path.exists(model_path):
+        with open(model_path, encoding="utf-8") as f:
+            model = json.load(f)
+        if model.get("season") != data["season"]:
+            model = None
 
     detail_path = os.path.join(os.path.dirname(os.path.abspath(src_path)), "details.json")
     detail = {}
@@ -1456,10 +1639,23 @@ def build(data, src_path):
             if len(photos) >= budget:
                 break
 
+    players = [trim(p) for p in ps]
+    if model:
+        try:
+            add_model(players, ps, model)
+        except (KeyError, TypeError) as e:      # an older model.json layout: board without it
+            print(f"model.json not in the current format ({e!r}); building without the Model scale")
+            players, model = [trim(p) for p in ps], None
     payload = {
+        "base": base,
         "people": people,
         "photos": photos,
-        "players": [trim(p) for p in ps],
+        "players": players,
+        # Brunch was the only board when marks were first saved in the browser,
+        # so it keeps the bare storage keys and nobody's saved marks move.
+        "ns": "" if league_key == "brunch" else league_key,
+        "model": {k: model.get(k) for k in ("version", "cutoff", "trained", "experts_updated", "experts")}
+                 if model else None,
         "boards": data["boards"],
         "myTeam": my_name,
         "size": size,
@@ -1480,22 +1676,54 @@ def build(data, src_path):
     chips = "".join(
         '<button class="chip" data-pos="%s" aria-pressed="%s">%s</button>'
         % (p, "true" if p == "ALL" else "false", p) for p in ["ALL", "RB", "WR", "TE"])
-    sbtns = "".join(
-        '<button class="scalebtn" data-scale="%s" aria-pressed="%s">%s</button>'
-        % (k, "true" if k == "week" else "false", v)
-        for k, v in [("week", f"Week {wk}"), ("ros", "Rest of season"), ("draft", "Draft day")])
+    def sbtn(k, label, on):
+        return ('<button class="scalebtn" data-scale="%s" aria-pressed="%s">%s</button>'
+                % (k, "true" if on else "false", label))
+    if model:
+        # the rest of the season read two ways, side by side; the week and draft day to one side
+        sbtns = ('<div class="scalegroup"><span class="sglabel">Rest of season</span>'
+                 + sbtn("ros", "Experts", True) + sbtn("model", "Model", False) + '</div>'
+                 + '<div class="scalegroup">' + sbtn("week", f"Week {wk}", False)
+                 + sbtn("draft", "Draft day", False) + '</div>')
+    else:
+        sbtns = "".join(sbtn(k, v, k == "week") for k, v in
+                        [("week", f"Week {wk}"), ("ros", "Rest of season"), ("draft", "Draft day")])
+    tscale_opts = ('<option value="ros">Rest of season</option>'
+                   + ('<option value="model">Model</option>' if model else "")
+                   + '<option value="week">This week</option><option value="draft">Draft day</option>')
+    model_foot = ("" if not model else
+                  " <b>Model</b> is our own season model, trained on every season since 2008, averaged"
+                  " with the FantasyPros rest-of-season board; tested week by week on 2020&ndash;2025,"
+                  " that blend beat the experts alone at every week. The <b>Model</b> / <b>Experts</b>"
+                  " column shows the other board's rank and how far the two disagree: strong green or red"
+                  " for 20+ places, paler for 5&ndash;19. A green <b>model likes</b> tag marks a player the"
+                  " Model ranks 20+ places above the experts.")
 
     cols = [("sk", "Rank", 1), ("n", "Player", 0), ("p", "Pos", 0), ("t", "Tm", 0),
-            ("o", "Opp", 0), ("pn", "Pos rank", 1), ("dn", "Drafted", 1),
+            ("o", "Opp", 0), ("pn", "Pos rank", 1), ("g", '<span class="cmplbl">Model</span>', 1),
+            ("dn", "Drafted", 1),
             ("m", "Move", 1), ("lo", "Expert range", 1), ("own", "Owner", 0)]
-    th = "".join('<th data-k="%s"%s>%s<span class="car"></span></th>'
-                 % (k, ' class="r"' if r else "", lbl) for k, lbl, r in cols)
+    th = "".join('<th data-k="%s" class="%s">%s<span class="car"></span></th>'
+                 % (k, ("r" if r else "") + (" cmpcol" if k == "g" else ""), lbl) for k, lbl, r in cols)
 
     def panel(cls, pid, title, sub):
         return f"""<section class="panel {cls}">
       <h2>{title}<span>{sub}</span></h2>
       <div class="rows" id="{pid}"></div>
     </section>"""
+
+    compare = "" if not model else f"""<h2 class="sec">Model vs experts</h2>
+  <p class="secsub">Rest of season, for <span class="teamname"></span>. The <b>Model</b> is our season model
+    averaged with the experts. When it ranks a player 20 or more places away from them, it was right about
+    60% of the time in testing on 2020&ndash;2025, in either direction. The tables also mark smaller leans of
+    5&ndash;19 places in paler colors: the pale red ones held up (right about 65% of the time), the pale
+    green ones did not (under 50%).</p>
+  <div class="grid">
+    {panel("adds", "cmp-fa", "Free agents it likes", "20+ places above the experts")}
+    {panel("buy", "cmp-other", "Trade targets it likes", "on other rosters")}
+    {panel("drops", "cmp-mine", "Yours it likes", "hold on to them")}
+    {panel("sell", "cmp-down", "Yours it likes less", "20+ places below the experts")}
+  </div>"""
 
     desc = (f"Rankings, waiver wire and trade tools for {lg['name']}, "
             "built on FantasyPros consensus and refreshed every hour.")
@@ -1525,7 +1753,7 @@ def build(data, src_path):
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>{CSS}</style>
 
-<div class="banner"><img src="og.jpg" alt="{esc(lg['name'])} fantasy football" width="1200" height="630"></div>
+{f'<div class="banner"><img src="{base}{card}" alt="{esc(lg["name"])} fantasy football" width="1200" height="630"></div>' if has_card else ""}
 <header class="top"><div class="wrap">
   <p class="eyebrow">FantasyPros consensus &middot; {data['season']} season</p>
   <h1 class="vh">{esc(lg['name'])}</h1>
@@ -1551,6 +1779,8 @@ def build(data, src_path):
     <h1 id="whoami" title="Click to flip every photo">Who are you</h1>
     <div class="pgrid" id="pgrid"></div>
   </div>
+
+  {compare}
 
   <button type="button" id="schbtn" aria-expanded="false" aria-controls="schmove">
     <span class="caret">&#9654;</span>Schmovement<span class="hint">who to add, buy, drop and sell</span>
@@ -1586,7 +1816,8 @@ def build(data, src_path):
   <div class="tablewrap">
     <table><thead><tr>
       <th class="r">Rank</th><th>Player</th><th>Pos</th><th>Tm</th><th>Opp</th>
-      <th class="r">Pos rank</th><th class="r">Drafted</th><th class="r">Move</th><th>Slot</th>
+      <th class="r">Pos rank</th><th class="r cmpcol"><span class="cmplbl">Model</span></th>
+      <th class="r">Drafted</th><th class="r">Move</th><th>Slot</th>
     </tr></thead><tbody id="rbody"></tbody></table>
   </div>
 
@@ -1598,7 +1829,8 @@ def build(data, src_path):
   <div class="tablewrap">
     <table><thead><tr>
       <th class="r">Rank</th><th>Player</th><th>Pos</th><th>Tm</th><th>Opp</th>
-      <th class="r">Pos rank</th><th class="r">Move</th>
+      <th class="r">Pos rank</th><th class="r cmpcol"><span class="cmplbl">Model</span></th>
+      <th class="r">Move</th>
       <th>Worst on this roster</th><th class="r">His overall</th>
     </tr></thead><tbody id="wbody"></tbody></table>
   </div>
@@ -1620,11 +1852,7 @@ def build(data, src_path):
     <label for="tpartner" class="eyebrow">Trade with</label>
     <select id="tpartner"></select>
     <label for="tscale" class="eyebrow">Board</label>
-    <select id="tscale">
-      <option value="ros">Rest of season</option>
-      <option value="week">This week</option>
-      <option value="draft">Draft day</option>
-    </select>
+    <select id="tscale">{tscale_opts}</select>
     <button id="tclear" class="chip" type="button">Clear</button>
   </div>
   <div class="tradegrid">
@@ -1665,7 +1893,7 @@ def build(data, src_path):
     <b>Move</b> is the change in <em>positional</em> rank since draft day; negative means the player
     has slid while the draft-day reputation lingers, which is what makes someone a sell-high.
     <b>Expert range</b> is the best and worst rank any single expert gave, so a wide spread means
-    thin agreement. Players with no rank on a board (injured, inactive) always sort last.
+    thin agreement. Players with no rank on a board (injured, inactive) always sort last.{model_foot}
   </footer>
 </div>
 
@@ -1674,10 +1902,11 @@ def build(data, src_path):
 """
 
 
-def main(src=None, dst=None):
+def main(src=None, dst=None, asset_base=None):
     src = src or os.path.join(HERE, "data.json")
     dst = dst or os.path.join(HERE, "report.html")
-    html = build(json.load(open(src, encoding="utf-8")), src)
+    league_key = os.path.basename(os.path.dirname(os.path.abspath(src))) or "league"
+    html = build(json.load(open(src, encoding="utf-8")), src, dst, league_key, asset_base)
     with open(dst, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Wrote {dst}  ({os.path.getsize(dst)//1024} KB)")

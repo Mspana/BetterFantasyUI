@@ -6,6 +6,7 @@ instead -- which matters when a scheduled job rewrites it every hour: the shell
 stays byte-identical and only the changed JSON lands in a commit.
 
     python build_site.py <league> <out-dir>
+    python build_site.py <league> <out-dir> --hidden   # unlisted: no link card, not indexed
 """
 import hashlib, io, json, os, re, shutil, sys
 
@@ -37,13 +38,17 @@ def trim_players(payload):
     return keep
 
 
-def load_people(out):
-    """Copy the prepared portraits into the site and return their manifest."""
+def load_people():
+    """The prepared portraits' manifest, every league's."""
+    man = os.path.join(HERE, "people_img", "people.json")
+    return json.load(io.open(man, encoding="utf-8")) if os.path.exists(man) else []
+
+
+def copy_people(out, people):
+    """Copy only the portraits this league's page shows."""
+    if not people:
+        return
     src = os.path.join(HERE, "people_img")
-    man = os.path.join(src, "people.json")
-    if not os.path.exists(man):
-        return []
-    people = json.load(io.open(man, encoding="utf-8"))
     dst = os.path.join(out, "people")
     os.makedirs(dst, exist_ok=True)
     for rec in people:
@@ -55,7 +60,6 @@ def load_people(out):
             target = os.path.join(dst, f)
             if not os.path.exists(target):
                 shutil.copy(os.path.join(src, f), target)
-    return people
 
 
 def split(html, people=None):
@@ -72,8 +76,17 @@ def split(html, people=None):
     js = js.replace(a, "", 1)
 
     news = payload.pop("detail", {})
+    # The site copies assets next to the page, so no climb back up is needed
+    # and the portraits are served from people/, not people_img/.
+    payload["base"] = ""
     if people:
-        payload["people"] = people
+        # the portraits are shared across leagues; the picker shows this league's teams only
+        teams = {p["own"] for p in payload["players"] if p.get("own")}
+        payload["people"] = [r for r in people if r["team"] in teams]
+    payload["people"] = [dict(r, img="people/" + os.path.basename(r["img"]),
+                              img2=("people/" + os.path.basename(r["img2"]))
+                                   if r.get("img2") else None)
+                         for r in payload.get("people", [])]
     keep = trim_players(payload)
     news = {k: v for k, v in news.items() if k in keep}
 
@@ -114,15 +127,27 @@ def split(html, people=None):
     return head + html[:m.start()] + loader, payload, news
 
 
-def main(league="brunch", out=None):
+def hide(html):
+    """An unlisted board: no link-preview card, and asked out of search engines."""
+    html = re.sub(r'<meta (?:property="og:|name="twitter:)[^>]*>\n?', "", html)
+    return html.replace('<meta charset="utf-8">\n',
+                        '<meta charset="utf-8">\n<meta name="robots" content="noindex, nofollow">\n', 1)
+
+
+def main(league="brunch", out=None, hidden=False):
     src = os.path.join(HERE, "leagues", league, "report.html")
     if not os.path.exists(src):
         sys.exit(f"no built report for '{league}' -- run run.py {league} first")
     out = out or os.path.join(HERE, "site")
     os.makedirs(os.path.join(out, "img"), exist_ok=True)
 
-    people = load_people(out)
-    html, data, news = split(io.open(src, encoding="utf-8").read(), people)
+    html, data, news = split(io.open(src, encoding="utf-8").read(), load_people())
+    copy_people(out, data["people"])
+    people = data["people"]
+    html = html.replace(f'src="../../site_assets/{league}-og.jpg"', 'src="og.jpg"')
+    html = html.replace(f'src="site_assets/{league}-og.jpg"', 'src="og.jpg"')
+    if hidden:
+        html = hide(html)
 
     def write(name, obj):
         path = os.path.join(out, name)
@@ -140,7 +165,7 @@ def main(league="brunch", out=None):
     if old != html:
         io.open(index, "w", encoding="utf-8").write(html)
 
-    card = os.path.join(HERE, "site_assets", "og.jpg")
+    card = os.path.join(HERE, "site_assets", f"{league}-og.jpg")
     if os.path.exists(card):
         dst_card = os.path.join(out, "og.jpg")
         if (not os.path.exists(dst_card)
@@ -165,4 +190,5 @@ def main(league="brunch", out=None):
 
 
 if __name__ == "__main__":
-    main(*(sys.argv[1:] or []))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    main(*args, hidden="--hidden" in sys.argv)
