@@ -17,7 +17,12 @@ For each league it produces one self-contained HTML page with:
   draft day are there too.
 - **Model vs experts** — the players the two boards disagree on, by 20+ places,
   split into free agents, trade targets and your own roster; every table shows
-  the other board's rank beside the one you picked.
+  the other board's rank beside the one you picked. Every gap of 5+ places
+  carries the model's reason ("targets", "age", "games"...), in full in the
+  drawer: the stat that sets the player apart from the players the experts rank
+  near him.
+- **Model insights on/off** — a switch beside the board buttons hides everything
+  the model adds, for the experts' boards alone. Each league remembers it.
 - **Viewing as** — switch to any team in the league to scout a trade partner.
 - **Player drawer** — click a player for their game log and recent FantasyPros news.
 - **Flag / dismiss** — click the dot next to a name to cycle green, red, clear.
@@ -173,6 +178,7 @@ to `logs/weekly.log`.
 | `build_site.py` | Turns a league's page into the static site (`--hidden` for an unlisted board) |
 | `weekly.py` | The weekly job: boards, model, exam snapshot, publish `model.json` |
 | `ml/predict.py` | This week's rest-of-season predictions for a league |
+| `ml/explain.py` | The model's reason for each gap from the experts (what-ifs against his expert-rank peers) |
 | `ml/features.py` | One row per player-season, frozen at a week |
 | `ml/data.py` | Downloads and caches the public datasets |
 | `ml/backtest.py` | Walk-forward backtest and the frozen model settings |

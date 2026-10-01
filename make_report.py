@@ -52,7 +52,7 @@ def add_model(players, raw, model):
         dn = tp["s"]["draft"]["pn"]
         tp["m"]["model"] = dn - m["pn"] if m and dn is not None else None
         if m and "ppg" in m:
-            tp["x"] = {k: m[k] for k in ("msk", "ppg", "g", "pts", "line", "back", "pb", "inj")
+            tp["x"] = {k: m[k] for k in ("msk", "ppg", "g", "pts", "line", "back", "pb", "inj", "why")
                        if k in m}
 
 
@@ -156,6 +156,7 @@ p.secsub{margin:0 0 12px;font-size:12.5px;color:var(--muted);max-width:66ch}
   border:1px solid var(--line);border-radius:3px;padding:1px 5px;white-space:nowrap}
 .move{font-size:12.5px;color:var(--muted);width:100%}
 .move .a{color:var(--ink);font-weight:600}
+.whytxt{display:block;color:var(--ink);font-size:12px;margin-top:3px}
 .delta{font-weight:600;padding:1px 6px;border-radius:3px;font-size:12px;
   font-family:"IBM Plex Mono",monospace}
 .up{color:var(--rise);background:var(--rise-soft)}
@@ -237,19 +238,21 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
   .teampick{position:absolute;top:20px;right:16px;margin:0;gap:0;flex-direction:column;
     align-items:flex-end}
 }
-#schbtn{font-family:Oswald,sans-serif;font-size:17px;letter-spacing:.06em;
+/* a section folded behind a button: Schmovement, and Model vs experts */
+.dropbtn{font-family:Oswald,sans-serif;font-size:17px;letter-spacing:.06em;
   text-transform:uppercase;cursor:pointer;border:1px solid var(--line);
   background:var(--surface);color:var(--ink);border-radius:6px;
   padding:11px 18px;display:flex;align-items:center;gap:10px;width:100%;
   box-shadow:var(--shadow);margin-top:4px}
-#schbtn:hover{background:var(--raised)}
-#schbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-#schbtn .caret{color:var(--muted);font-size:12px;transition:transform .15s ease}
-#schbtn[aria-expanded="true"] .caret{transform:rotate(90deg)}
-#schbtn .hint{margin-left:auto;font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;
+.dropbtn:hover{background:var(--raised)}
+.dropbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dropbtn .caret{color:var(--muted);font-size:12px;transition:transform .15s ease}
+.dropbtn[aria-expanded="true"] .caret{transform:rotate(90deg)}
+.dropbtn .hint{margin-left:auto;font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;
   letter-spacing:0;text-transform:none;color:var(--muted)}
-#schmove{margin-top:14px}
-@media (prefers-reduced-motion:reduce){#schbtn .caret{transition:none}}
+.dropbody{margin-top:14px}
+.dropsec{margin-bottom:12px}
+@media (prefers-reduced-motion:reduce){.dropbtn .caret{transition:none}}
 /* ---- who are you ---- */
 /* Block, not flex. As a column flex container this shrank the grid whenever
    the tiles were taller than the window -- flex items shrink by default -- and
@@ -434,6 +437,22 @@ tr.mine:hover td{background:var(--accent-soft);filter:brightness(.97)}
 .sglabel{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--muted)}
 .nocmp .cmpcol{display:none}
+/* the model's reason beside its gap from the experts: a word in the tables, a sentence elsewhere */
+.why{font-size:10.5px;letter-spacing:.03em;color:var(--muted);margin-left:5px;white-space:nowrap;
+  font-family:"IBM Plex Sans",sans-serif;font-weight:500}
+/* the Model insights switch; off, the board is the experts' alone */
+.modeltoggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;background:none;border:0;
+  padding:6px 2px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted)}
+.modeltoggle .sw{position:relative;flex:0 0 30px;height:17px;border-radius:9px;background:var(--line);
+  transition:background .15s}
+.modeltoggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;
+  background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.modeltoggle[aria-checked="true"]{color:var(--ink)}
+.modeltoggle[aria-checked="true"] .sw{background:var(--accent)}
+.modeltoggle[aria-checked="true"] .sw::after{transform:translateX(13px)}
+.modeltoggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.nomodel .modelonly{display:none}
 /* rows where the Model and the experts part by 20+ places: green = the Model ranks him higher */
 tr.mvup>td:first-child{box-shadow:inset 4px 0 0 var(--rise)}
 tr.mvdown>td:first-child{box-shadow:inset 4px 0 0 var(--fall)}
@@ -494,10 +513,15 @@ const BOARD_NAME = { ros: "rest-of-season", week: "weekly", draft: "draft-day", 
 // Several leagues' boards can share one site, and so one browser storage; each
 // keeps its own marks, team and board choice under its own keys.
 const LS = k => D.ns ? k + ":" + D.ns : k;
+// Model insights can be switched off for a plainer board; each league remembers its choice.
+let modelOn = true;
+try { modelOn = localStorage.getItem(LS("fr_model")) !== "off"; } catch(e){}
+const hasModel = () => !!D.model && modelOn;
 // How far the Model moves a player from the experts' rest-of-season rank (+ = higher).
 // Only the experts' top 200, the range the backtest measured.
 const MOVE = 20;
 const mvOf = p => {
+  if (!hasModel() || !p.x) return null;
   const e = p.s.ros.sk, m = p.s.model ? p.s.model.sk : null;
   return e != null && m != null && e <= 200 ? e - m : null;
 };
@@ -506,7 +530,7 @@ const STARTABLE = {QB:12, RB:24, WR:24, TE:12, DST:12, K:12};
 let scale = D.model ? "ros" : "week", team = D.myTeam, pos = "ALL", owner = "ALL", q = "", hideDismissed = false;
 try {
   const s0 = localStorage.getItem(LS("fr_scale"));
-  if (s0 && D.boards[s0] !== undefined || (s0 === "model" && D.model)) scale = s0;
+  if (s0 && D.boards[s0] !== undefined || (s0 === "model" && hasModel())) scale = s0;
 } catch(e){}
 document.querySelectorAll(".scalebtn").forEach(x => x.setAttribute("aria-pressed", x.dataset.scale === scale));
 // The chosen team is saved as its ESPN id, which survives a rename; a save
@@ -555,24 +579,33 @@ const likesTag = p => (mvOf(p) ?? 0) >= MOVE
 const LEAN = 5;                  // below this the two boards agree
 const mvLevel = m => m == null ? "" : m >= MOVE ? "up" : m <= -MOVE ? "down"
                    : m >= LEAN ? "lean-up" : m <= -LEAN ? "lean-down" : "";
-const cmpOn = () => !!D.model && (scale === "ros" || scale === "model");
+const cmpOn = () => hasModel() && (scale === "ros" || scale === "model");
 const mvClass = p => {
   const lv = cmpOn() ? mvLevel(mvOf(p)) : "";
   return lv ? " mv" + lv : "";
 };
+// The model's reasons for the gap, whichever way it runs now: [[tag, sentence], ...].
+// Only for a gap the board marks (5+ places); ml/explain.py writes both directions.
+const whyOf = p => {
+  const m = mvOf(p), w = p.x && p.x.why;
+  return w && mvLevel(m) ? (w[m > 0 ? "u" : "d"] || []) : [];
+};
+const whyLine = p => whyOf(p).map(r => r[1]).join(". ");
 // the other board's rank, and how far the two disagree
 function cmpCell(p){
   const other = scale === "model" ? p.s.ros.sk : (p.s.model ? p.s.model.sk : null);
   if (other == null) return "--";
   const m = mvOf(p), lv = mvLevel(m);
   if (!lv) return "#" + other;
-  return `#${other} <span class="delta ${lv}">${m > 0 ? "+" : ""}${m}</span>`;
+  const w = whyOf(p);
+  return `#${other} <span class="delta ${lv}">${m > 0 ? "+" : ""}${m}</span>${
+    w.length ? `<span class="why" title="${attr(whyLine(p))}">${esc(w[0][0])}</span>` : ""}`;
 }
 const nameCell = p => `${faceFor(p)}${p.n}${p.inj?` <span class="inj">${p.inj}</span>`:''}${likesTag(p)}${markDot(p)}`;
 // when a player on IR comes back: ESPN's date, pushed back by how past IR stints went
 const irNote = p => {
   const x = p.x;
-  if (!x || !("back" in x)) return null;
+  if (!hasModel() || !x || !("back" in x)) return null;
   if (x.back == null) return "out for the season";
   return x.pb != null ? `back ~week ${x.back} &middot; ${Math.round(x.pb * 100)}% he returns`
                       : `ESPN: back week ${x.back}`;
@@ -936,14 +969,17 @@ function renderWho(){
   if (lab) lab.hidden = true;
 }
 
-function toggleSchmove(force){
-  const box = $("#schmove"), btn = $("#schbtn");
+// a section folded behind its button; whether it's open is remembered per league
+function toggleDrop(btnSel, boxSel, key, force){
+  const box = $(boxSel), btn = $(btnSel);
   if (!box || !btn) return;
   const open = force === undefined ? box.hidden : force;
   box.hidden = !open;
   btn.setAttribute("aria-expanded", String(open));
-  try { localStorage.setItem(LS("fr_schmove"), open ? "1" : "0"); } catch(e){}
+  try { localStorage.setItem(LS(key), open ? "1" : "0"); } catch(e){}
 }
+const toggleSchmove = force => toggleDrop("#schbtn", "#schmove", "fr_schmove", force);
+const toggleCompare = force => toggleDrop("#cmpbtn", "#cmpbox", "fr_cmpopen", force);
 
 /* Touch picking: press shows the other photo, release selects. A tap also
    fires a click afterwards, so the click is swallowed once to avoid picking
@@ -1378,7 +1414,7 @@ function leanNote(p){
 
 function projSection(p){
   const x = p.x;
-  if (!x) return "";
+  if (!x || !hasModel()) return "";
   const L = x.line, n = v => Math.round(v), td = v => (+v).toFixed(1);
   const rec = `${n(L.rec)} catches on ${n(L.tgt)} targets, ${n(L.ryd)} yds, ${td(L.rtd)} TD`;
   const rush = `${n(L.car)} carries, ${n(L.uyd)} yds, ${td(L.utd)} TD`;
@@ -1395,6 +1431,7 @@ function projSection(p){
     ${ir ? `<p class="dmeta">${ir}</p>` : ""}
     <p class="dmeta">Model <b>#${p.s.model.sk}</b>${erk != null ? `, experts <b>#${erk}</b>` : ""}${
       leanNote(p)} &middot; the model on its own: #${x.msk}.</p>
+    ${whyOf(p).length ? `<p class="dmeta proj">Why: ${esc(whyLine(p))}.</p>` : ""}
   </div>`;
 }
 
@@ -1440,7 +1477,7 @@ function openPlayer(k){
       <h3>Consensus rank</h3>
       <div class="scalegrid">
         ${scaleCard(p,"draft","Draft day")}${scaleCard(p,"week","Week "+D.week)}${scaleCard(p,"ros","Rest of season")}${
-          D.model ? scaleCard(p,"model","Model") : ""}
+          hasModel() ? scaleCard(p,"model","Model") : ""}
       </div>
       <p class="dmeta" style="margin-top:9px">Move since draft day: ${
         p.m[scale]==null ? "--" : (p.m[scale]>0?"+":"")+p.m[scale]+" places at "+esc(p.p)}</p>
@@ -1470,7 +1507,7 @@ function closePlayer(){
 }
 
 function renderCompare(){
-  if (!D.model || !$("#cmp-fa")) return;
+  if (!hasModel() || !$("#cmp-fa")) return;
   const ranked = D.players.filter(p => SKILL.includes(p.p) && mvOf(p) != null
                                    && !(hideDismissed && markOf(p) === "dismiss"));
   const up = ranked.filter(p => mvOf(p) >= MOVE).sort((a, b) => mvOf(b) - mvOf(a));
@@ -1479,7 +1516,8 @@ function renderCompare(){
     <span class="tag">${p.p} ${p.t}</span>${p.inj ? `<span class="inj">${p.inj}</span>` : ""}
     ${dcell(mvOf(p))}
     <span class="move">Experts #${p.s.ros.sk} <span class="a">&rarr; Model #${p.s.model.sk}</span>${
-      p.own && p.own !== team ? " &middot; " + p.own : ""}</span>
+      p.own && p.own !== team ? " &middot; " + p.own : ""}${
+      whyOf(p).length ? `<span class="whytxt">${esc(whyLine(p))}</span>` : ""}</span>
   </div>`;
   const put = (sel, list, empty) => {
     $(sel).innerHTML = list.length ? list.slice(0, 6).map(row).join("") : `<div class="empty">${empty}</div>`;
@@ -1491,12 +1529,31 @@ function renderCompare(){
                          .sort((a, b) => mvOf(a) - mvOf(b)), "Nobody on this roster.");
 }
 
+// Show or hide everything the model adds, and move off the Model board when it goes.
+function applyModel(){
+  const on = hasModel();
+  document.body.classList.toggle("nomodel", !on);
+  const t = $("#modeltoggle");
+  if (t) t.setAttribute("aria-checked", on);
+  document.querySelectorAll('.scalebtn[data-scale="model"]').forEach(b => b.hidden = !on);
+  const o = document.querySelector('#tscale option[value="model"]');
+  if (o){ o.hidden = !on; o.disabled = !on; }
+  if (on) return;
+  if (scale === "model"){
+    scale = "ros";
+    document.querySelectorAll(".scalebtn").forEach(x => x.setAttribute("aria-pressed", x.dataset.scale === scale));
+  }
+  if (TRADE.scale === "model"){ TRADE.scale = "ros"; clearFound(); }
+  if (sortKey === "g"){ sortKey = "sk"; sortDir = 1; }
+}
+
 function renderAll(){ renderBoard(); renderCompare(); renderWho(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
   if (e.target.closest("#whoisit")){ showPicker(); return; }
   if (e.target.closest("#schbtn")){ toggleSchmove(); return; }
+  if (e.target.closest("#cmpbtn")){ toggleCompare(); return; }
   const tile = e.target.closest(".ptile");
   if (tile){
     if (swallowClick){ swallowClick = false; return; }
@@ -1558,6 +1615,11 @@ on(document, "click", e=>{
   // scoped to rows: sortable <th> also carry data-k and must not open the drawer
   const rowEl = e.target.closest("tr[data-k], .row[data-k], li[data-k]");
   if (rowEl && !e.target.closest("a")){ openPlayer(rowEl.dataset.k); return; }
+  if (e.target.closest("#modeltoggle")){
+    modelOn = !modelOn;
+    try { localStorage.setItem(LS("fr_model"), modelOn ? "on" : "off"); } catch(e){}
+    applyModel(); renderAll(); return;
+  }
   const s = e.target.closest(".scalebtn");
   if (s){
     scale = s.dataset.scale;
@@ -1627,10 +1689,14 @@ document.querySelectorAll("th[data-k]").forEach(x=>{
     if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); x.click(); }
   });
 });
+applyModel();
 renderAll();
 try {
   toggleSchmove(localStorage.getItem(LS("fr_schmove")) === "1");
 } catch(e){ toggleSchmove(false); }
+try {
+  toggleCompare(localStorage.getItem(LS("fr_cmpopen")) === "1");
+} catch(e){ toggleCompare(false); }
 try {
   if (!teamSaved) showPicker();
 } catch(e){ showPicker(); }
@@ -1765,7 +1831,9 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
         sbtns = ('<div class="scalegroup"><span class="sglabel">Rest of season</span>'
                  + sbtn("ros", "Experts", True) + sbtn("model", "Model", False) + '</div>'
                  + '<div class="scalegroup">' + sbtn("week", f"Week {wk}", False)
-                 + sbtn("draft", "Draft day", False) + '</div>')
+                 + sbtn("draft", "Draft day", False) + '</div>'
+                 + '<button type="button" class="modeltoggle" id="modeltoggle" role="switch"'
+                 ' aria-checked="true"><span class="sw" aria-hidden="true"></span>Model insights</button>')
     else:
         sbtns = "".join(sbtn(k, v, k == "week") for k, v in
                         [("week", f"Week {wk}"), ("ros", "Rest of season"), ("draft", "Draft day")])
@@ -1773,12 +1841,16 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
                    + ('<option value="model">Model</option>' if model else "")
                    + '<option value="week">This week</option><option value="draft">Draft day</option>')
     model_foot = ("" if not model else
-                  " <b>Model</b> is our own season model, trained on every season since 2008, averaged"
+                  " <span class=modelonly><b>Model</b> is our own season model, trained on every season since 2008, averaged"
                   " with the FantasyPros rest-of-season board; tested week by week on 2020&ndash;2025,"
                   " that blend beat the experts alone at every week. The <b>Model</b> / <b>Experts</b>"
                   " column shows the other board's rank and how far the two disagree: strong green or red"
                   " for 20+ places, paler for 5&ndash;19. A green <b>model likes</b> tag marks a player the"
-                  " Model ranks 20+ places above the experts.")
+                  " Model ranks 20+ places above the experts. Beside each gap of 5+ places is the model's"
+                  " reason: the stat that lifts (or sinks) the player most against the players the experts"
+                  " rank near him at his position, found by giving him their numbers and asking the model"
+                  " again. It explains the model, which can be wrong. Switch <b>Model insights</b> off at the"
+                  " top for the experts' boards alone.</span>")
 
     cols = [("sk", "Rank", 1), ("n", "Player", 0), ("p", "Pos", 0), ("t", "Tm", 0),
             ("o", "Opp", 0), ("pn", "Pos rank", 1), ("g", '<span class="cmplbl">Model</span>', 1),
@@ -1793,18 +1865,23 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
       <div class="rows" id="{pid}"></div>
     </section>"""
 
-    compare = "" if not model else f"""<h2 class="sec">Model vs experts</h2>
+    compare = "" if not model else f"""<div class="modelonly dropsec">
+  <button type="button" id="cmpbtn" class="dropbtn" aria-expanded="false" aria-controls="cmpbox">
+    <span class="caret">&#9654;</span>Model vs experts<span class="hint">who the model rates above or below the experts</span>
+  </button>
+  <div id="cmpbox" class="dropbody" hidden>
   <p class="secsub">Rest of season, for <span class="teamname"></span>. The <b>Model</b> is our season model
     averaged with the experts. When it ranks a player 20 or more places away from them, it was right about
     60% of the time in testing on 2020&ndash;2025, in either direction. The tables also mark smaller leans of
     5&ndash;19 places in paler colors: the pale red ones held up (right about 65% of the time), the pale
-    green ones did not (under 50%).</p>
+    green ones did not (under 50%). Under each player is the model's reason: the stat that sets him apart
+    from the players the experts rank near him.</p>
   <div class="grid">
     {panel("adds", "cmp-fa", "Free agents it likes", "20+ places above the experts")}
     {panel("buy", "cmp-other", "Trade targets it likes", "on other rosters")}
     {panel("drops", "cmp-mine", "Yours it likes", "hold on to them")}
     {panel("sell", "cmp-down", "Yours it likes less", "20+ places below the experts")}
-  </div>"""
+  </div></div></div>"""
 
     desc = (f"Rankings, waiver wire and trade tools for {lg['name']}, "
             "built on FantasyPros consensus and refreshed every hour.")
@@ -1863,10 +1940,10 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
 
   {compare}
 
-  <button type="button" id="schbtn" aria-expanded="false" aria-controls="schmove">
+  <button type="button" id="schbtn" class="dropbtn" aria-expanded="false" aria-controls="schmove">
     <span class="caret">&#9654;</span>Schmovement<span class="hint">who to add, buy, drop and sell</span>
   </button>
-  <div id="schmove" hidden>
+  <div id="schmove" class="dropbody" hidden>
     <div class="grid">
       {panel("adds", "p-adds", "Waiver adds", "free agents above the weakest starter")}
       {panel("buy", "p-buy", "Buy low", "rose in value")}

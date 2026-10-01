@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from . import data, features as F, injury_news as N, injury_labels as L
+from .explain import explain
 from .backtest import ppg_model, avail_model, enough_games, FIRST_TRAIN, MODEL_VERSION
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -49,7 +50,9 @@ def stat_targets(stats, games, season, cutoff):
     return per.div(g, axis=0).rename(columns={v: k for k, v in STATS.items()})
 
 
-def train_and_predict(season, scoring, log=print):
+def train_and_predict(season, scoring, log=print, keep=None):
+    """The season's rows with the model's predictions. Pass a dict as `keep`
+    to get the fitted points-per-game model back in it, as keep["ppg"]."""
     t0 = time.time()
     st, gm, ix = data.stats(), data.games(), data.ids()
     sn, xf, inj, ros = data.snaps(), data.xfp(), data.injuries(), data.rosters()
@@ -63,6 +66,8 @@ def train_and_predict(season, scoring, log=print):
                        for y in range(FIRST_TRAIN, season)], ignore_index=True)
     fit = train[enough_games(train)]
     m = ppg_model().fit(fit[F.FEATURES], fit.ros_ppg)
+    if keep is not None:
+        keep["ppg"] = m
     a = avail_model().fit(train[F.FEATURES], (train.ros_g / train.ros_possible).clip(0, 1))
 
     now = F.build(st, gm, ix, season, cutoff, scoring, with_target=False, **extra)
@@ -112,7 +117,8 @@ def attach(board_players, pred, ids):
         if r is None and expert is None:
             continue
         row = {"key": bp["key"], "name": bp["name"], "pos": bp["pos"], "team": bp["team"],
-               "owner": bp.get("owner"), "mine": bool(bp.get("mine")), "expert_sk": expert}
+               "owner": bp.get("owner"), "mine": bool(bp.get("mine")), "expert_sk": expert,
+               "player_id": gsis if r is not None else None}
         if r is not None:
             row.update({
                 "m_ppg": r.m_ppg, "m_games": r.m_games, "m_total": r.m_total,
@@ -152,6 +158,8 @@ def board_entry(r):
     e.update({"msk": int(r.model_sk), "ppg": round(r.m_ppg, 1), "g": round(r.m_games, 1),
               "pts": round(r.m_total),
               "line": {k: round(getattr(r, f"pg_{k}") * r.m_games, 1 if k.endswith("td") else 0) for k in STATS}})
+    if isinstance(getattr(r, "why", None), dict):
+        e["why"] = r.why
     if pd.notna(r.back_week):
         e.update({"back": int(r.back_week) if r.back_week < 99 else None,
                   "pb": round(r.p_return, 2) if pd.notna(r.p_return) else None,
@@ -164,7 +172,8 @@ def main(league):
     lg = board["league"]
     scoring = SCORING.get(float(lg["ppr"]), "ppr")
     print(f"{lg['name']}  ({scoring.upper()})")
-    pred, cutoff = train_and_predict(board["season"], scoring)
+    keep = {}
+    pred, cutoff = train_and_predict(board["season"], scoring, keep=keep)
     # the 2026 final exam: one PPR snapshot a week, taken the first time it can be
     try:
         from . import exam
@@ -172,6 +181,10 @@ def main(league):
     except Exception as e:                      # never let the exam block a prediction
         print(f"exam: snapshot skipped ({e})")
     df = rank_up(attach(board["players"], pred, data.ids()))
+    # the model's reason for parting from the experts, each way, for the board to quote
+    why = explain(df, pred, keep["ppg"], cutoff)
+    df["why"] = df.key.map(why)
+    print(f"reasons for {len(why)} players")
     top = df[(df.expert_sk.fillna(999) <= COMPARE_TOP) | (df.model_sk <= COMPARE_TOP)]
 
     def table(title, rows):
