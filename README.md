@@ -23,6 +23,11 @@ For each league it produces one self-contained HTML page with:
   near him.
 - **Model insights on/off** — a switch beside the board buttons hides everything
   the model adds, for the experts' boards alone. Each league remembers it.
+- **Advanced stats** — season-to-date target share, touches, points vs what that
+  usage usually scores, air yards vs yards after the catch, and each player's
+  offense and quarterback, for the experts' top 60 or ranks 61–150. WRs in 61–150
+  with the biggest share of yards after the catch are tagged YAC-heavy: in
+  2020–2025 they beat the experts' rank about 70% of the time.
 - **Viewing as** — switch to any team in the league to scout a trade partner.
 - **Player drawer** — click a player for their game log and recent FantasyPros news.
 - **Flag / dismiss** — click the dot next to a name to cycle green, red, clear.
@@ -178,6 +183,7 @@ to `logs/weekly.log`.
 | `build_site.py` | Turns a league's page into the static site (`--hidden` for an unlisted board) |
 | `weekly.py` | The weekly job: boards, model, exam snapshot, publish `model.json` |
 | `ml/predict.py` | This week's rest-of-season predictions for a league |
+| `ml/advanced.py` | Season-to-date usage and receiving splits for the Advanced stats table |
 | `ml/explain.py` | The model's reason for each gap from the experts (what-ifs against his expert-rank peers) |
 | `ml/features.py` | One row per player-season, frozen at a week |
 | `ml/data.py` | Downloads and caches the public datasets |

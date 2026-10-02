@@ -73,8 +73,18 @@ def news(slug, limit=4):
     return out
 
 
-def gamelog(slug, limit=6):
-    html = _get(f"https://www.fantasypros.com/nfl/games/{slug}.php")
+# FantasyPros' game log shows standard scoring unless asked for another
+SCORING = {"ppr": "?scoring=PPR", "half": "?scoring=HALF", "std": ""}
+
+
+def scoring_of(league):
+    """The league's scoring as the game log names it, from ESPN's points per catch."""
+    ppr = float(league.get("ppr") or 0)
+    return "ppr" if ppr >= 0.75 else "half" if ppr >= 0.25 else "std"
+
+
+def gamelog(slug, scoring="std", limit=6):
+    html = _get(f"https://www.fantasypros.com/nfl/games/{slug}.php{SCORING[scoring]}")
     if not html:
         return {}
     i = html.find("<table")
@@ -122,28 +132,36 @@ def targets(data, top_fa=50):
 MAX_AGE = 6 * 3600
 
 
-def one(p, refresh):
-    path = os.path.join(CACHE, f"{p['slug']}.json")
+def _cached(path, fetch, refresh):
     fresh = (os.path.exists(path)
              and time.time() - os.path.getmtime(path) < MAX_AGE)
     if fresh and not refresh:
         try:
             with open(path, encoding="utf-8") as f:
-                return p["key"], json.load(f)
+                return json.load(f)
         except Exception:
             pass
     try:
-        rec = {"news": news(p["slug"]), "log": gamelog(p["slug"])}
+        val = fetch()
     except Exception:
         # a rate-limited refresh must not leave the player with nothing:
         # stale news beats no news
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
-                return p["key"], json.load(f)
+                return json.load(f)
         raise
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(rec, f)
-    return p["key"], rec
+        json.dump(val, f)
+    return val
+
+
+def one(p, refresh, scoring):
+    # news is the same for every league; the game log's points follow each league's scoring,
+    # so leagues that score differently keep separate logs
+    nw = _cached(os.path.join(CACHE, f"{p['slug']}.news.json"), lambda: news(p["slug"]), refresh)
+    log = _cached(os.path.join(CACHE, f"{p['slug']}.log-{scoring}.json"),
+                  lambda: gamelog(p["slug"], scoring), refresh)
+    return p["key"], {"news": nw, "log": log}
 
 
 def main():
@@ -153,12 +171,13 @@ def main():
     os.makedirs(CACHE, exist_ok=True)
     data = json.load(open(src, encoding="utf-8"))
     tg = targets(data)
-    print(f"Fetching news + game logs for {len(tg)} players "
+    scoring = scoring_of(data.get("league") or {})
+    print(f"Fetching news + {scoring.upper()} game logs for {len(tg)} players "
           f"({sum(1 for p in tg if p['owner'])} rostered)...")
 
     out, done, failed = {}, 0, []
     with cf.ThreadPoolExecutor(max_workers=3) as ex:
-        futs = {ex.submit(one, p, refresh): p for p in tg}
+        futs = {ex.submit(one, p, refresh, scoring): p for p in tg}
         for f in cf.as_completed(futs):
             p = futs[f]
             try:

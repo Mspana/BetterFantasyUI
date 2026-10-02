@@ -21,6 +21,7 @@ import pandas as pd
 
 from . import data, features as F, injury_news as N, injury_labels as L
 from .explain import explain
+from .advanced import advanced
 from .backtest import ppg_model, avail_model, enough_games, FIRST_TRAIN, MODEL_VERSION
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -153,6 +154,8 @@ def load_board(league):
 def board_entry(r):
     """One player's slice of model.json, keyed the way the board reads it."""
     e = {"sk": int(r.blend_sk), "pr": f"{r.pos}{int(r.blend_pn)}", "pn": int(r.blend_pn)}
+    if isinstance(getattr(r, "adv", None), dict):
+        e["adv"] = r.adv
     if pd.isna(r.m_total):
         return e
     e.update({"msk": int(r.model_sk), "ppg": round(r.m_ppg, 1), "g": round(r.m_games, 1),
@@ -185,6 +188,8 @@ def main(league):
     why = explain(df, pred, keep["ppg"], cutoff)
     df["why"] = df.key.map(why)
     print(f"reasons for {len(why)} players")
+    # season-to-date usage and receiving splits for the board's Advanced stats table
+    df["adv"] = df.player_id.map(advanced(pred, board["season"], cutoff))
     top = df[(df.expert_sk.fillna(999) <= COMPARE_TOP) | (df.model_sk <= COMPARE_TOP)]
 
     def table(title, rows):

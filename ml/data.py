@@ -160,6 +160,15 @@ def espn_injuries():
     return pd.DataFrame(rows)
 
 
+def weekly_all(season):
+    """One season's regular-season weekly stats for every position (stats() keeps skill players)."""
+    p = _fetch(f"{NV}/stats_player/stats_player_week_{season}.parquet",
+               os.path.join(CACHE, "stats", f"week_{season}.parquet"),
+               LIVE_MAX_AGE if season == current_season() else None)
+    d = pd.read_parquet(p)
+    return d[d.season_type == "REG"]
+
+
 def games():
     p = _fetch("https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
                os.path.join(CACHE, "games.csv"), LIVE_MAX_AGE)

@@ -51,6 +51,8 @@ def add_model(players, raw, model):
                             "pn": m["pn"] if m else None, "lo": None, "hi": None}
         dn = tp["s"]["draft"]["pn"]
         tp["m"]["model"] = dn - m["pn"] if m and dn is not None else None
+        if m and "adv" in m:
+            tp["a"] = m["adv"]
         if m and "ppg" in m:
             tp["x"] = {k: m[k] for k in ("msk", "ppg", "g", "pts", "line", "back", "pb", "inj", "why")
                        if k in m}
@@ -252,7 +254,13 @@ tr:hover button.mkdot.on .d,.row:hover button.mkdot.on .d{opacity:1}
   letter-spacing:0;text-transform:none;color:var(--muted)}
 .dropbody{margin-top:14px}
 .dropsec{margin-bottom:12px}
+/* advanced stats */
+#advbox .chips{margin:0 0 10px}
+th[data-as]{cursor:pointer;user-select:none}
+#advtable td.dim{color:var(--muted)}
 @media (prefers-reduced-motion:reduce){.dropbtn .caret{transition:none}}
+/* on a phone the hint drops under the title instead of squeezing it onto two lines */
+@media (max-width:560px){.dropbtn{flex-wrap:wrap;row-gap:2px}.dropbtn .hint{flex-basis:100%;margin-left:22px;text-align:left}}
 /* ---- who are you ---- */
 /* Block, not flex. As a column flex container this shrank the grid whenever
    the tiles were taller than the window -- flex items shrink by default -- and
@@ -980,6 +988,71 @@ function toggleDrop(btnSel, boxSel, key, force){
 }
 const toggleSchmove = force => toggleDrop("#schbtn", "#schmove", "fr_schmove", force);
 const toggleCompare = force => toggleDrop("#cmpbtn", "#cmpbox", "fr_cmpopen", force);
+const toggleAdv = force => toggleDrop("#advbtn", "#advbox", "fr_advopen", force);
+
+/* ---- Advanced stats: season to date, for the players the experts rank in a range ---- */
+let advRange = "top", advSort = "sk", advDir = 1;
+const ADV_RANGE = { top: [1, 60], mid: [61, 150] };
+const advPct = v => v == null ? "--" : Math.round(v * 100) + "%";
+const advNum = (v, d = 1) => v == null ? "--" : (+v).toFixed(d);
+// rank ascending, stats descending; a click on the same header flips it
+const ADV_KEY = {
+  sk: p => p.s.ros.sk, tsh: p => p.a.tsh, opp: p => p.a.opp, xfp: p => p.a.xfp, pts: p => p.a.pts,
+  vs: p => p.a.vs, adot: p => p.a.adot, yacc: p => p.a.yacc, yacsh: p => p.p === "RB" ? null : p.a.yacsh,
+  imp: p => p.a.imp, qb: p => p.a.qb,
+};
+// WRs the experts rank 61-150 whose share of yards after the catch is in that group's top
+// third. In 2020-2025 they beat the experts' rank about 70% of the time, against 55% for
+// others ranked the same, in every season; in the top 60 the edge didn't hold, so no tag there.
+function yacHeavy(){
+  const pool = D.players.filter(p => p.p === "WR" && p.a && p.a.yacsh != null && p.a.rec >= 5
+                                  && p.s.ros.sk != null && p.s.ros.sk >= 61 && p.s.ros.sk <= 150);
+  if (pool.length < 6) return new Set();
+  const v = pool.map(p => p.a.yacsh).sort((a, b) => a - b);
+  const cut = v[Math.floor(v.length * 2 / 3)];
+  return new Set(pool.filter(p => p.a.yacsh >= cut).map(p => p.k));
+}
+function renderAdv(){
+  const body = $("#advbody");
+  if (!body) return;
+  const [lo, hi] = ADV_RANGE[advRange], heavy = yacHeavy(), key = ADV_KEY[advSort];
+  const rows = D.players.filter(p => p.a && SKILL.includes(p.p) && p.s.ros.sk != null
+                                     && p.s.ros.sk >= lo && p.s.ros.sk <= hi
+                                     && !(hideDismissed && markOf(p) === "dismiss"))
+    .sort((a, b) => {
+      const x = key(a), y = key(b);
+      if (x == null && y == null) return a.s.ros.sk - b.s.ros.sk;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (advSort === "sk" ? x - y : y - x) * advDir || a.s.ros.sk - b.s.ros.sk;
+    });
+  body.innerHTML = rows.map(p => {
+    const a = p.a, vs = a.vs == null || Math.abs(a.vs) < 1 ? "flat" : a.vs > 0 ? "up" : "down";
+    return `<tr class="${p.own === team ? "mine" : ""}${markClass(p)}" data-k="${p.k}">
+      <td class="num r">${p.s.ros.sk}</td>
+      <td class="pname">${faceFor(p)}${p.n}${p.inj ? ` <span class="inj">${p.inj}</span>` : ""}${heavy.has(p.k)
+        ? ' <span class="likes" title="WRs ranked 61-150 with this much of their yardage after the catch beat the experts\' rank about 70% of the time in 2020-2025">YAC-heavy</span>'
+        : ""}${markDot(p)}</td>
+      <td class="num">${p.p}</td>
+      <td class="num r">${advPct(a.tsh)}</td>
+      <td class="num r">${advNum(a.opp)}</td>
+      <td class="num r">${advNum(a.xfp)}</td>
+      <td class="num r">${advNum(a.pts)}</td>
+      <td class="r"><span class="delta ${vs}">${a.vs == null ? "--" : (a.vs > 0 ? "+" : "") + advNum(a.vs)}</span></td>
+      <td class="num r">${advNum(a.adot)}</td>
+      <td class="num r">${advNum(a.yacc)}</td>
+      <td class="num r${p.p === "RB" ? " dim" : ""}">${p.p === "RB" ? "--" : advPct(a.yacsh)}</td>
+      <td class="num r">${advNum(a.imp)}</td>
+      <td class="num r">${advNum(a.qb, 2)}</td>
+      <td>${ownerCell(p)}</td></tr>`;
+  }).join("") || `<tr><td colspan="14" class="empty">No players in this range have played yet.</td></tr>`;
+  document.querySelectorAll("#advtable th[data-as]").forEach(th => {
+    const on = th.dataset.as === advSort;
+    if (on) th.setAttribute("aria-sort", (advSort === "sk") === (advDir === 1) ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
+    th.querySelector(".car").textContent = on ? ((advSort === "sk") === (advDir === 1) ? " \u25b2" : " \u25bc") : "";
+  });
+}
 
 /* Touch picking: press shows the other photo, release selects. A tap also
    fires a click afterwards, so the click is swallowed once to avoid picking
@@ -1547,13 +1620,25 @@ function applyModel(){
   if (sortKey === "g"){ sortKey = "sk"; sortDir = 1; }
 }
 
-function renderAll(){ renderBoard(); renderCompare(); renderWho(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); }
+function renderAll(){ renderBoard(); renderCompare(); renderWho(); renderPanels(); renderPower(); renderRoster(); renderWaiver(); renderTrade(); renderTable(); renderAdv(); }
 
 on(document, "click", e=>{
   if (e.target.closest("#dclose") || e.target.id === "scrim"){ closePlayer(); return; }
   if (e.target.closest("#whoisit")){ showPicker(); return; }
   if (e.target.closest("#schbtn")){ toggleSchmove(); return; }
   if (e.target.closest("#cmpbtn")){ toggleCompare(); return; }
+  if (e.target.closest("#advbtn")){ toggleAdv(); return; }
+  const ar = e.target.closest("button[data-adv]");
+  if (ar){
+    advRange = ar.dataset.adv;
+    document.querySelectorAll("button[data-adv]").forEach(x => x.setAttribute("aria-pressed", x === ar));
+    renderAdv(); return;
+  }
+  const as = e.target.closest("th[data-as]");
+  if (as){
+    if (as.dataset.as === advSort) advDir = -advDir; else { advSort = as.dataset.as; advDir = 1; }
+    renderAdv(); return;
+  }
   const tile = e.target.closest(".ptile");
   if (tile){
     if (swallowClick){ swallowClick = false; return; }
@@ -1697,6 +1782,14 @@ try {
 try {
   toggleCompare(localStorage.getItem(LS("fr_cmpopen")) === "1");
 } catch(e){ toggleCompare(false); }
+try {
+  toggleAdv(localStorage.getItem(LS("fr_advopen")) === "1");
+} catch(e){ toggleAdv(false); }
+// the advanced table's headers sort from the keyboard too
+document.querySelectorAll("th[data-as]").forEach(x => {
+  x.tabIndex = 0;
+  on(x, "keydown", ev => { if (ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); x.click(); } }, "adv-" + x.dataset.as);
+});
 try {
   if (!teamSaved) showPicker();
 } catch(e){ showPicker(); }
@@ -1883,6 +1976,46 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
     {panel("sell", "cmp-down", "Yours it likes less", "20+ places below the experts")}
   </div></div></div>"""
 
+    def ath(k, label, tip, right=True):
+        return (f'<th class="{"r" if right else ""}" data-as="{k}" title="{tip}">{label}<span class="car"></span></th>'
+                if k else f'<th class="{"r" if right else ""}">{label}</th>')
+    has_adv = any("a" in p for p in players)
+    advanced = "" if not has_adv else f"""
+  <button type="button" id="advbtn" class="dropbtn" aria-expanded="false" aria-controls="advbox">
+    <span class="caret">&#9654;</span>Advanced stats<span class="hint">volume, points vs usage, air yards vs YAC</span>
+  </button>
+  <div id="advbox" class="dropbody" hidden>
+    <p class="secsub">Season to date, for the players the experts rank in the range picked. <b>Exp pts/g</b> is what
+      his targets and carries usually score, given where on the field they came; <b>vs usage</b> is what he has
+      scored above or below that (both PPR, whatever the league plays). <b>aDOT</b> is air yards per target;
+      <b>YAC</b> is yards after the catch. <b>Offense</b> is his team's points a game by Vegas lines, <b>QB EPA</b>
+      his quarterbacks' expected points added per dropback. Tested on 2020&ndash;2025: scoring below his usage did
+      <em>not</em> mean a player went on to beat the experts' rank (they already expect the bounce-back), while
+      scoring above it held up slightly. WRs ranked 61&ndash;150 with the biggest share of their yards after the
+      catch, tagged <span class="likes">YAC-heavy</span>, beat the experts' rank about 70% of the time against 55%
+      for others ranked the same; in the top 60 that edge didn't hold.</p>
+    <div class="chips">
+      <button type="button" class="chip" data-adv="top" aria-pressed="true">Top 60</button>
+      <button type="button" class="chip" data-adv="mid" aria-pressed="false">61&ndash;150</button>
+    </div>
+    <div class="tablewrap">
+      <table id="advtable"><thead><tr>
+        {ath("sk", "Rank", "The experts' rest-of-season rank")}{ath("", "Player", "", False)}{ath("", "Pos", "", False)}
+        {ath("tsh", "Tgt share", "His share of his team's targets")}
+        {ath("opp", "Touches/g", "Carries plus targets a game")}
+        {ath("xfp", "Exp pts/g", "Points a game his usage usually produces (PPR)")}
+        {ath("pts", "Pts/g", "Points a game he has scored (PPR)")}
+        {ath("vs", "vs usage", "Pts/g minus Exp pts/g")}
+        {ath("adot", "aDOT", "Air yards per target")}
+        {ath("yacc", "YAC/catch", "Yards after the catch per catch")}
+        {ath("yacsh", "YAC %", "Share of his receiving yards gained after the catch (WR and TE)")}
+        {ath("imp", "Offense", "His team's points a game by Vegas lines")}
+        {ath("qb", "QB EPA", "His quarterbacks' expected points added per dropback")}
+        {ath("", "Owner", "", False)}
+      </tr></thead><tbody id="advbody"></tbody></table>
+    </div>
+  </div>"""
+
     desc = (f"Rankings, waiver wire and trade tools for {lg['name']}, "
             "built on FantasyPros consensus and refreshed every hour.")
     ppr = "Full PPR" if lg["ppr"] >= 0.75 else ("Half PPR" if lg["ppr"] >= 0.25 else "Standard")
@@ -1952,6 +2085,7 @@ def build(data, src_path, dst_path, league_key, asset_base=None):
     </div>
     {panel("", "p-stash", "IR stash", "costs no active roster spot")}
   </div>
+{advanced}
 
   <h2 class="sec">League power rankings</h2>
   <p class="secsub">Every roster scored on the board selected at the top. Click a team to see its roster.
