@@ -561,6 +561,11 @@ let sortKey = "sk", sortDir = 1;
 const sk = (p) => p.s[scale].sk;
 const pn = (p) => p.s[scale].pn;
 const mv = (p) => p.m[scale];
+/* A player on bye has no weekly rank, which is not the same as ranking last:
+   on the weekly board he sits out every comparison instead of becoming the
+   weakest player on the roster, whom any free agent would beat. */
+const onBye = (p, sc = scale) => sc === "week" && !!p.by && +p.by === +D.week;
+const prOf = (p, sc = scale) => p.s[sc].pr || (onBye(p, sc) ? "bye" : "unranked");
 const mineOf = () => D.players.filter(p => p.own === team);
 const fas    = () => D.players.filter(p => !p.own);
 const others = () => D.players.filter(p => p.own && p.own !== team);
@@ -628,7 +633,7 @@ const ownerCell = p => p.own
 const orderFor = position => SKILL.includes(position) ? sk : pn;
 
 function worstAt(position){
-  const list = mineOf().filter(p => p.p === position && !p.ir)
+  const list = mineOf().filter(p => p.p === position && !p.ir && !onBye(p))
                        .sort(by(orderFor(position)));
   return list.length ? list[list.length - 1] : null;
 }
@@ -650,7 +655,7 @@ function renderRoster(){
     <td class="num r">${sk(p) ?? '--'}</td>
     <td class="pname">${nameCell(p)}</td>
     <td class="num">${p.p}</td><td class="num">${p.t}</td><td class="num">${p.o||''}</td>
-    <td class="num r">${p.s[scale].pr || 'unranked'}</td>
+    <td class="num r">${prOf(p)}</td>
     <td class="num r cmpcol">${cmpCell(p)}</td>
     <td class="num r">${p.s.draft.pr || '--'}</td>
     <td class="r">${dcell(mv(p))}</td>
@@ -676,7 +681,7 @@ function renderWaiver(){
       <td class="num r">${p.s[scale].pr||'--'}</td>
       <td class="num r cmpcol">${cmpCell(p)}</td>
       <td class="r">${dcell(mv(p))}</td>
-      <td>${w ? w.n+' <span class="owner">('+(w.s[scale].pr||'unranked')+')</span>' : '--'}</td>
+      <td>${w ? w.n+' <span class="owner">('+prOf(w)+')</span>' : '--'}</td>
       <td class="num r">${w && sk(w) != null ? sk(w) : '--'}</td>
     </tr>`;
   }).join("") || `<tr><td colspan="10" class="empty">No ranked free agents.</td></tr>`;
@@ -690,7 +695,7 @@ function renderWaiver(){
         <td class="num r ${up?'up-yes':''}">${p.s[scale].pr||'--'}</td>
         <td class="pname">${nameCell(p)}</td>
         <td class="num">${p.t}</td>
-        <td>${w ? w.n+' <span class="owner">('+(w.s[scale].pr||'unranked')+')</span>' : '--'}</td>
+        <td>${w ? w.n+' <span class="owner">('+prOf(w)+')</span>' : '--'}</td>
       </tr>`;
     }).join("") || `<tr><td colspan="4" class="empty">None available.</td></tr>`;
     const label = position==='DST' ? 'Defense' : position==='K' ? 'Kicker' : 'Quarterback';
@@ -705,14 +710,14 @@ function panelRow(p, note){
     ${faceFor(p)}<span class="dname">${p.n}</span>
     <span class="tag">${p.p} ${p.t}</span>${p.inj?`<span class="inj">${p.inj}</span>`:''}
     ${dcell(mv(p))}
-    <span class="move">${p.s.draft.pr||'undrafted'} <span class="a">&rarr; ${p.s[scale].pr||'unranked'}</span>${note?'  &middot; '+note:''}</span>
+    <span class="move">${p.s.draft.pr||'undrafted'} <span class="a">&rarr; ${prOf(p)}</span>${note?'  &middot; '+note:''}</span>
   </div>`;
 }
 
 function renderPanels(){
   const mine = mineOf(), fa = fas(), rest = others();
 
-  const sell = mine.filter(p => p.s.draft.pn != null && (mv(p) == null || mv(p) < -8))
+  const sell = mine.filter(p => p.s.draft.pn != null && !onBye(p) && (mv(p) == null || mv(p) < -8))
                    .sort((a,b)=>(mv(a)??-9999)-(mv(b)??-9999));
 
   const buy = rest.filter(p => mv(p) != null && mv(p) > 8 && pn(p) != null
@@ -726,11 +731,11 @@ function renderPanels(){
     const wn = pn(w);
     fa.filter(p => p.p === position && pn(p) != null && (wn == null || pn(p) < wn))
       .sort(by(pn)).slice(0,3)
-      .forEach(p => adds.push([p, `${w.n} (${w.s[scale].pr || 'unranked'})`]));
+      .forEach(p => adds.push([p, `${w.n} (${prOf(w)})`]));
   }
 
   const drops = [];
-  mine.filter(p=>!p.ir).sort(by(pn)).reverse().forEach(p=>{
+  mine.filter(p=>!p.ir && !onBye(p)).sort(by(pn)).reverse().forEach(p=>{
     const b = bestFaAt(p.p);
     if (b && (pn(p) == null || pn(p) > pn(b)))
       drops.push([p, `${b.n} (${b.s[scale].pr})`]);
@@ -788,7 +793,7 @@ function renderTable(){
     <td class="num r">${sk(p) ?? '--'}</td>
     <td class="pname">${nameCell(p)}</td>
     <td class="num">${p.p}</td><td class="num">${p.t}</td><td class="num">${p.o||''}</td>
-    <td class="num r">${p.s[scale].pr || 'unranked'}</td>
+    <td class="num r">${prOf(p)}</td>
     <td class="num r cmpcol">${cmpCell(p)}</td>
     <td class="num r">${p.s.draft.pr || '--'}</td>
     <td class="r">${dcell(mv(p))}</td>
@@ -1125,7 +1130,7 @@ function rosterPeek(tm){
     const v = valueAt(p, sc);
     return `<li class="${markClass(p).trim()}" data-k="${p.k}" role="button" tabindex="0">
       <span class="slot">${slot}</span><span>${nameCell(p)}</span>
-      <span class="rk">${p.s[sc].pr || "unranked"}${v != null ? " &middot; " + v.toFixed(0) : ""}</span></li>`;
+      <span class="rk">${prOf(p, sc)}${v != null ? " &middot; " + v.toFixed(0) : ""}</span></li>`;
   };
   const group = (title, items) => items.length
     ? `<div><h4>${title}</h4><ul class="prlist">${items.join("")}</ul></div>` : "";
@@ -1250,7 +1255,7 @@ function lineupAt(roster, sc){
 function tradeRow(p, side){
   const on = TRADE[side].has(p.k);
   const v = tval(p);
-  const rk = p.s[TRADE.scale].pr || "unranked";
+  const rk = prOf(p, TRADE.scale);
   return `<button type="button" class="trow${v === null ? " nv" : ""}" data-side="${side}"
     data-tk="${p.k}" aria-pressed="${on}">
     <span class="tick"></span><span class="nm">${p.n}${p.ir ? " (IR)" : ""}</span>
@@ -1350,7 +1355,7 @@ function renderTrade(){
       " Taking " + recv.length + " for " + give.length + " costs a roster spot, so " +
       cuts.map(p => p.n).join(", ") + " would have to be dropped." : ""}${unvalued.length ?
       " Not scored, as they have no cross-position board: " +
-      unvalued.map(p => p.n + " (" + p.p + " " + (p.s[sc].pr || "unranked") + ")").join(", ") + "." : ""}${
+      unvalued.map(p => p.n + " (" + p.p + " " + prOf(p, sc) + ")").join(", ") + "." : ""}${
       give.concat(recv).some(p => p.ir) ?
       " A rest-of-season rank for a player on IR assumes he returns and holds the same role." : ""}</p>`;
 }
